@@ -1,6 +1,5 @@
 """Dashboard page: worker info, system metrics, and stats overview."""
 
-from __future__ import annotations
 
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (

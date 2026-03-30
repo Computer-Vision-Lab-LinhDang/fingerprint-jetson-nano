@@ -1,6 +1,5 @@
 """Main window with sidebar navigation and page stack."""
 
-from __future__ import annotations
 
 import logging
 from typing import Optional

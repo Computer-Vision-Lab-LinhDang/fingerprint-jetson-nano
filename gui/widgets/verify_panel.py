@@ -1,6 +1,5 @@
 """Verification page: 1:1 verify and 1:N identify."""
 
-from __future__ import annotations
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (

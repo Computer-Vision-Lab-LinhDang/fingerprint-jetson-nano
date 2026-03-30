@@ -1,6 +1,5 @@
 """Entry point for the PyQt5 GUI: python -m gui"""
 
-from __future__ import annotations
 
 import logging
 import os

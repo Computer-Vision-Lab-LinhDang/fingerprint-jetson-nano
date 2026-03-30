@@ -1,6 +1,5 @@
 """Registration page: create users and enroll fingerprints."""
 
-from __future__ import annotations
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
