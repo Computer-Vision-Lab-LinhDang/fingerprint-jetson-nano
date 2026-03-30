@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
+from typing import Optional
+
 try:
     from typing import Annotated
 except ImportError:
@@ -55,9 +57,9 @@ async def list_users(
     pipeline: Annotated[PipelineService, Depends(get_pipeline_service)],
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
-    search: str | None = Query(default=None, description="Search by name or employee_id"),
-    department: str | None = Query(default=None),
-    role: str | None = Query(default=None),
+    search: Optional[str] = Query(default=None, description="Search by name or employee_id"),
+    department: Optional[str] = Query(default=None),
+    role: Optional[str] = Query(default=None),
 ) -> ApiResponse[UserListResponse]:
     users, total = await pipeline.list_users(
         page=page, limit=limit, search=search, department=department, role=role

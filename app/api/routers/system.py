@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
+from typing import List, Optional
+
 try:
     from typing import Annotated
 except ImportError:
@@ -58,11 +60,11 @@ async def logs(
     pipeline: Annotated[PipelineService, Depends(get_pipeline_service)],
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=50, ge=1, le=200),
-    user_id: str | None = Query(default=None),
-    action: str | None = Query(default=None),
-    decision: str | None = Query(default=None),
-    date_from: str | None = Query(default=None, description="ISO date string"),
-    date_to: str | None = Query(default=None, description="ISO date string"),
+    user_id: Optional[str] = Query(default=None),
+    action: Optional[str] = Query(default=None),
+    decision: Optional[str] = Query(default=None),
+    date_from: Optional[str] = Query(default=None, description="ISO date string"),
+    date_to: Optional[str] = Query(default=None, description="ISO date string"),
 ) -> ApiResponse[LogListResponse]:
     raw_logs, total = await pipeline.get_logs(
         page=page,
@@ -155,10 +157,10 @@ async def backup(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/devices", response_model=ApiResponse[list[DeviceInfo]])
+@router.get("/devices", response_model=ApiResponse[List[DeviceInfo]])
 async def devices(
     sys_svc: Annotated[SystemService, Depends(get_system_service)],
-) -> ApiResponse[list[DeviceInfo]]:
+) -> ApiResponse[List[DeviceInfo]]:
     devs = await sys_svc.list_devices()
     return ApiResponse(
         success=True,
