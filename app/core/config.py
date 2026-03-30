@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -92,6 +92,19 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     sensor_vid: int = Field(default=0x0483, description="USB Vendor ID of the sensor")
     sensor_pid: int = Field(default=0x5720, description="USB Product ID of the sensor")
+
+    @field_validator("sensor_vid", "sensor_pid", mode="before")
+    @classmethod
+    def _parse_hex_int(cls, v):
+        if isinstance(v, int):
+            return v
+        if isinstance(v, str):
+            v = v.strip()
+            if v.startswith(("0x", "0X")):
+                return int(v, 16)
+            return int(v)
+        return v
+
     sensor_sdk_path: str = Field(
         default="/opt/fingerprint-sdk",
         description="Path to sensor SDK",
