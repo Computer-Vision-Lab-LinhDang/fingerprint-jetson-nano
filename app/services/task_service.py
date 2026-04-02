@@ -285,6 +285,55 @@ class TaskService:
             logger.error("VERIFY task %s failed: %s", task_id, exc)
             self._publish_error(task_id, str(exc), elapsed_ms)
 
+    # ── SYNC task ──────────────────────────────────────────────────────────
+
+    def process_sync(self, task_data: dict) -> None:
+        """Process sync task: receive enrollment data from orchestrator.
+
+        Another worker enrolled a fingerprint; we need to store it locally
+        in SQLite and add it to our FAISS index so we can verify/identify
+        this user offline.
+
+        Args:
+            task_data: dict with 'user' and 'fingerprint' keys matching
+                       the upstream enrollment event payload format.
+        """
+        source_worker = task_data.get("worker_id", "unknown")
+        user_name = task_data.get("user", {}).get("full_name", "?")
+
+        logger.info(
+            "Processing SYNC from worker %s: user=%s",
+            source_worker, user_name,
+        )
+
+        # Skip if this enrollment came from ourselves
+        from app.core.config import get_settings
+        my_id = get_settings().device_id
+        if source_worker == my_id:
+            logger.debug("Skipping sync from self (worker_id=%s)", my_id)
+            return
+
+        try:
+            from app.services.pipeline_service import PipelineService
+
+            pipeline_svc = PipelineService.get_instance()
+            if pipeline_svc is None:
+                raise RuntimeError("PipelineService not initialized")
+
+            success = _run_async(
+                pipeline_svc.sync_remote_enrollment(task_data)
+            )
+            if success:
+                logger.info(
+                    "SYNC completed: user '%s' added to local DB + FAISS",
+                    user_name,
+                )
+            else:
+                logger.warning("SYNC failed for user '%s'", user_name)
+
+        except Exception as exc:
+            logger.error("SYNC task failed: %s", exc)
+
     # ── Helpers ──────────────────────────────────────────────────────────────
 
     async def _capture_from_sensor(self) -> bytes:

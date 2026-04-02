@@ -107,6 +107,21 @@ def create_message_handler(mqtt_client_ref: Any) -> Any:
                 elif task_type == "match":
                     logger.info("📥 MATCH task: %s", data.get("task_id", ""))
 
+                # ── task/{worker_id}/sync ──────────────────────────────────
+                elif task_type == "sync":
+                    user_name = data.get("user", {}).get("full_name", "?")
+                    source = data.get("worker_id", "?")
+                    logger.info(
+                        "📥 SYNC task: user=%s from worker=%s",
+                        user_name, source,
+                    )
+                    thread = threading.Thread(
+                        target=_handle_sync_task,
+                        args=(mqtt_client_ref, data),
+                        daemon=True,
+                    )
+                    thread.start()
+
                 # ── task/{worker_id}/message ──────────────────────────────
                 elif task_type == "message":
                     content = data.get("content", "")
@@ -166,6 +181,16 @@ def _handle_verify_task(mqtt_client_ref: Any, task_data: dict) -> None:
         _publish_error(mqtt_client_ref, task_data.get("task_id", ""), str(exc))
     finally:
         mqtt_client_ref.current_task_id = None
+
+
+def _handle_sync_task(mqtt_client_ref: Any, task_data: dict) -> None:
+    """Process sync task: store remote enrollment locally (SQLite + FAISS)."""
+    try:
+        from app.services.task_service import TaskService
+        task_svc = TaskService(mqtt_client_ref)
+        task_svc.process_sync(task_data)
+    except Exception as exc:
+        logger.error("Sync task failed: %s", exc)
 
 
 def _handle_model_update(mqtt_client_ref: Any, payload: ModelUpdatePayload) -> None:

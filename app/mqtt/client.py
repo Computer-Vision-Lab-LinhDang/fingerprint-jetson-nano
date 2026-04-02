@@ -148,6 +148,7 @@ class MQTTWorkerClient:
                 ("task/{}/match".format(self._worker_id), 1),
                 ("task/{}/register".format(self._worker_id), 1),
                 ("task/{}/verify".format(self._worker_id), 1),
+                ("task/{}/sync".format(self._worker_id), 1),
                 ("task/{}/message".format(self._worker_id), 1),
                 ("task/{}/model/update".format(self._worker_id), 1),
             ]

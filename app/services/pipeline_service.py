@@ -444,6 +444,18 @@ class PipelineService:
                 user_id, finger, quality,
             )
 
+            # --- Upstream: broadcast enrollment to orchestrator via MQTT ---
+            try:
+                self._publish_enrollment_event(
+                    user_obj=user,
+                    fp_id=fp_id if self._fp_repo else 0,
+                    finger_index=finger,
+                    embedding_list=embedding_list,
+                    quality_score=quality,
+                )
+            except Exception as exc:
+                logger.warning("Failed to publish enrollment event: %s", exc)
+
             return EnrollResult(
                 user_id=user_id,
                 finger=finger,
@@ -724,6 +736,156 @@ class PipelineService:
             "model_loaded": info["model_loaded"],
             "uptime_seconds": info["uptime_seconds"],
         }
+
+
+    # -- upstream MQTT publish -----------------------------------------------
+
+    def _publish_enrollment_event(
+        self,
+        user_obj: Any,
+        fp_id: int,
+        finger_index: int,
+        embedding_list: list[float],
+        quality_score: float,
+    ) -> None:
+        """Publish a new enrollment event to orchestrator via MQTT.
+
+        Topic: worker/{device_id}/enrolled
+        The orchestrator is responsible for broadcasting this to other workers.
+        """
+        import json
+        try:
+            from app.mqtt.client import get_mqtt_client
+            mqtt_client = get_mqtt_client()
+        except Exception:
+            logger.debug("MQTT client not available, skipping enrollment publish.")
+            return
+
+        if not mqtt_client.is_connected:
+            logger.debug("MQTT not connected, skipping enrollment publish.")
+            return
+
+        user_dict = user_obj.to_dict() if hasattr(user_obj, "to_dict") else {}
+        payload = {
+            "event": "enrollment",
+            "worker_id": self._settings.device_id,
+            "user": {
+                "id": user_dict.get("id"),
+                "employee_id": user_dict.get("employee_id", ""),
+                "full_name": user_dict.get("full_name", ""),
+                "department": user_dict.get("department", ""),
+                "role": user_dict.get("role", "user"),
+            },
+            "fingerprint": {
+                "fp_id": fp_id,
+                "finger_index": finger_index,
+                "embedding": embedding_list,
+                "quality_score": quality_score,
+            },
+        }
+        topic = "worker/{}/enrolled".format(self._settings.device_id)
+        mqtt_client.publish(topic, json.dumps(payload), qos=1)
+        logger.info("📤 Enrollment event published for user %s (fp_id=%d)",
+                    user_dict.get("full_name", "?"), fp_id)
+
+    # -- downstream: receive sync from orchestrator --------------------------
+
+    async def sync_remote_enrollment(self, data: dict[str, Any]) -> bool:
+        """Handle a sync payload from orchestrator (another worker enrolled).
+
+        Writes user + fingerprint to local SQLite and adds embedding to FAISS.
+        Does NOT re-run inference — the embedding is received pre-computed.
+
+        Args:
+            data: dict with keys 'user' and 'fingerprint', matching the
+                  upstream enrollment event payload format.
+
+        Returns:
+            True if sync succeeded, False otherwise.
+        """
+        user_data = data.get("user", {})
+        fp_data = data.get("fingerprint", {})
+
+        remote_user_id = user_data.get("id")
+        employee_id = user_data.get("employee_id", "")
+        full_name = user_data.get("full_name", "")
+        department = user_data.get("department", "")
+        role = user_data.get("role", "user")
+
+        embedding_list = fp_data.get("embedding", [])
+        finger_index = fp_data.get("finger_index", 0)
+        quality_score = fp_data.get("quality_score", 0.0)
+
+        if not embedding_list or not employee_id:
+            logger.warning("Sync payload missing embedding or employee_id, skipping.")
+            return False
+
+        loop = asyncio.get_running_loop()
+
+        try:
+            # --- Upsert user ---
+            if self._user_repo is not None:
+                existing = await loop.run_in_executor(
+                    None, self._user_repo.get_by_employee_id, employee_id
+                )
+                if existing is None:
+                    user = User(
+                        employee_id=employee_id,
+                        full_name=full_name,
+                        department=department,
+                        role=role,
+                    )
+                    existing = await loop.run_in_executor(
+                        None, self._user_repo.create, user
+                    )
+                    logger.info("Sync: created local user '%s' (id=%d)",
+                                full_name, existing.id)
+                local_user_id = existing.id
+            else:
+                logger.warning("Sync: no user repo, cannot persist.")
+                return False
+
+            # --- Encrypt and save fingerprint ---
+            embedding_enc = None
+            if self._crypto is not None:
+                embedding_enc = self._crypto.encrypt_embedding(embedding_list)
+            else:
+                import struct
+                embedding_enc = struct.pack(
+                    "<{}f".format(EMBEDDING_DIM), *embedding_list
+                )
+
+            fp_record = Fingerprint(
+                user_id=local_user_id,
+                finger_index=finger_index,
+                embedding_enc=embedding_enc,
+                quality_score=quality_score,
+                image_hash="synced",
+            )
+
+            if self._fp_repo is not None:
+                saved = await loop.run_in_executor(
+                    None, self._fp_repo.create, fp_record
+                )
+                fp_id = saved.id
+
+                # --- Add to FAISS immediately ---
+                emb_array = np.array(embedding_list, dtype=np.float32)
+                if self._pipeline is not None:
+                    self._pipeline.enroll(emb_array, fp_id)
+
+                logger.info(
+                    "Sync: enrolled fp_id=%d for user '%s' (finger=%d)",
+                    fp_id, full_name, finger_index,
+                )
+                return True
+            else:
+                logger.warning("Sync: no fingerprint repo, cannot persist.")
+                return False
+
+        except Exception as exc:
+            logger.error("Sync enrollment failed: %s", exc)
+            return False
 
 
 # ---------------------------------------------------------------------------
