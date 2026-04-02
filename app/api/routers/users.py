@@ -20,6 +20,7 @@ from app.api.schemas import (
     EnrollRequest,
     EnrollResponse,
     EnrolledFinger,
+    FingerEnum,
     PaginationMeta,
     UserCreate,
     UserListResponse,
