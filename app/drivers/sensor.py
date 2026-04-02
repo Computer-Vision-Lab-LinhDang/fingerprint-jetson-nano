@@ -266,18 +266,46 @@ class USBSensorDriver(SensorDriver):
 
 
 class MockSensorDriver(SensorDriver):
-    """Mock sensor for development/testing without hardware."""
+    """Mock sensor that loads real sample images from data/sample/.
 
-    def __init__(self) -> None:
+    On init, scans ``data/sample/*.tif`` and caches them.  Each
+    ``capture_image()`` call returns the next sample in round-robin.
+    Falls back to random noise if no sample files are found.
+    """
+
+    def __init__(self, sample_dir: Optional[str] = None) -> None:
         self._connected = False
         self._finger_present = False
+        self._sample_images: list[bytes] = []
+        self._sample_index: int = 0
+        self._sample_dir = sample_dir or "data/sample"
+
+    def _load_samples(self) -> None:
+        """Scan sample_dir for .tif/.bmp/.png images and cache as bytes."""
+        import os
+        import glob
+
+        patterns = ["*.tif", "*.bmp", "*.png", "*.jpg"]
+        files: list[str] = []
+        for pat in patterns:
+            files.extend(sorted(glob.glob(os.path.join(self._sample_dir, pat))))
+
+        self._sample_images = []
+        for f in files:
+            try:
+                with open(f, "rb") as fh:
+                    self._sample_images.append(fh.read())
+            except Exception:
+                pass
 
     def open(self) -> bool:
         self._connected = True
+        self._load_samples()
         return True
 
     def close(self) -> None:
         self._connected = False
+        self._sample_images.clear()
 
     def is_connected(self) -> bool:
         return self._connected
@@ -285,6 +313,21 @@ class MockSensorDriver(SensorDriver):
     def capture_image(self) -> CaptureResult:
         if not self._connected:
             return CaptureResult(success=False, error="Not connected")
+
+        if self._sample_images:
+            # Round-robin through sample images
+            image_data = self._sample_images[self._sample_index % len(self._sample_images)]
+            self._sample_index += 1
+            return CaptureResult(
+                success=True,
+                image_data=image_data,
+                width=192,
+                height=192,
+                quality_score=65.0,
+                has_finger=True,
+            )
+
+        # Fallback: random noise (no sample files found)
         import numpy as np
         image = np.random.randint(50, 200, (192, 192), dtype=np.uint8)
         return CaptureResult(
@@ -297,13 +340,15 @@ class MockSensorDriver(SensorDriver):
         )
 
     def check_finger(self) -> bool:
+        if self._sample_images:
+            return True
         return self._finger_present
 
     def get_info(self) -> SensorInfo:
         return SensorInfo(
             vendor_id=0x0000,
             product_id=0x0000,
-            name="Mock Sensor",
+            name="Mock Sensor (sample images: {})".format(len(self._sample_images)),
             resolution_dpi=500,
             image_width=192,
             image_height=192,

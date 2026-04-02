@@ -165,7 +165,7 @@ class TaskService:
 
             # Step 2: Extract embedding using pipeline
             embedding, profiling = _run_async(
-                pipeline_svc.pipeline.extract_embedding(image_bytes)
+                pipeline_svc._pipeline.extract_embedding(image_bytes)
             )
 
             elapsed_ms = (time.time() - t0) * 1000
@@ -237,7 +237,7 @@ class TaskService:
 
             # Step 2: Extract probe embedding
             probe_embedding, profiling = _run_async(
-                pipeline_svc.pipeline.extract_embedding(image_bytes)
+                pipeline_svc._pipeline.extract_embedding(image_bytes)
             )
 
             elapsed_ms = (time.time() - t0) * 1000
@@ -297,10 +297,10 @@ class TaskService:
         if not sensor.is_connected:
             raise RuntimeError("Sensor not connected")
 
-        image_bytes = await sensor.capture()
-        if image_bytes is None:
-            raise RuntimeError("Sensor capture returned None")
-        return image_bytes
+        capture = await sensor.capture_image()
+        if not capture.success:
+            raise RuntimeError("Sensor capture failed: {}".format(capture.error))
+        return capture.image_data
 
     def _download_image(self, url: str) -> bytes:
         """Download image from presigned URL."""

@@ -39,14 +39,14 @@ async def verify(
     body: VerifyRequest,
     pipeline: Annotated[PipelineService, Depends(get_pipeline_service)],
 ) -> ApiResponse[VerifyResponse]:
-    result = await pipeline.verify_1to1(user_id=body.user_id)
+    result = await pipeline.verify_1to1(user_id=int(body.user_id))
     return ApiResponse(
         success=True,
         data=VerifyResponse(
             matched=result.matched,
             score=result.score,
             threshold=result.threshold,
-            user_id=result.user_id,
+            user_id=str(result.user_id),
             latency_ms=result.latency_ms,
         ),
     )

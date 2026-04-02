@@ -6,6 +6,8 @@ import math
 from datetime import datetime, timezone
 from typing import List, Optional
 
+from dateutil.parser import isoparse
+
 try:
     from typing import Annotated
 except ImportError:
@@ -66,29 +68,41 @@ async def logs(
     date_from: Optional[str] = Query(default=None, description="ISO date string"),
     date_to: Optional[str] = Query(default=None, description="ISO date string"),
 ) -> ApiResponse[LogListResponse]:
+    uid = int(user_id) if user_id else None
     raw_logs, total = await pipeline.get_logs(
         page=page,
         limit=limit,
-        user_id=user_id,
+        user_id=uid,
         action=action,
         decision=decision,
         date_from=date_from,
         date_to=date_to,
     )
-    entries = [
-        LogEntry(
-            id=l["id"],
-            timestamp=datetime.fromtimestamp(l["timestamp"], tz=timezone.utc),
-            user_id=l.get("user_id"),
-            employee_id=l.get("employee_id"),
-            action=l["action"],
-            decision=l["decision"],
-            score=l.get("score"),
-            latency_ms=l.get("latency_ms"),
-            details=l.get("details"),
+    entries = []
+    for l in raw_logs:
+        ts = l.get("timestamp", "")
+        if isinstance(ts, str):
+            try:
+                dt = isoparse(ts)
+            except Exception:
+                dt = datetime.now(tz=timezone.utc)
+        elif isinstance(ts, datetime):
+            dt = ts
+        else:
+            dt = datetime.now(tz=timezone.utc)
+        entries.append(
+            LogEntry(
+                id=str(l.get("id", "")),
+                timestamp=dt,
+                user_id=str(l.get("matched_user_id", "")) if l.get("matched_user_id") else None,
+                employee_id=None,
+                action=l.get("mode", "verify"),
+                decision=l.get("decision", "REJECT"),
+                score=l.get("score"),
+                latency_ms=l.get("latency_ms"),
+                details=None,
+            )
         )
-        for l in raw_logs
-    ]
     pages = max(1, math.ceil(total / limit))
     return ApiResponse(
         success=True,
@@ -109,7 +123,19 @@ async def stats(
     pipeline: Annotated[PipelineService, Depends(get_pipeline_service)],
 ) -> ApiResponse[StatsResponse]:
     data = await pipeline.get_stats()
-    return ApiResponse(success=True, data=StatsResponse(**data))
+    return ApiResponse(
+        success=True,
+        data=StatsResponse(
+            enrolled_users=data.get("enrolled_users", 0),
+            enrolled_fingers=data.get("enrolled_fingerprints", 0),
+            verifications_today=0,
+            identifications_today=0,
+            acceptance_rate=0.0,
+            rejection_rate=0.0,
+            avg_latency_ms=0.0,
+            uptime_seconds=data.get("uptime_seconds", 0.0),
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,8 @@
 """
-Singleton service wrapping the core VerificationPipeline.
+Singleton service bridging the real VerificationPipeline, sensor, and database.
 
-Provides async methods for enrollment, 1:1 verification, and 1:N identification.
-Initialized once on app startup and shared via FastAPI DI.
+Provides async methods for enrollment, 1:1 verification, and 1:N identification
+using the actual AI pipeline (preprocessing → minutiae → graph → inference → FAISS).
 """
 
 from __future__ import annotations
@@ -10,23 +10,30 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 
 from app.core.config import get_settings
+from app.database.crypto import CryptoService
+from app.database.database import DatabaseManager
+from app.database.models import (
+    EMBEDDING_DIM,
+    Fingerprint,
+    User,
+    VerificationDecision,
+    VerificationLog,
+    VerificationMode,
+)
+from app.database.repository import (
+    FingerprintRepository,
+    UserRepository,
+    VerificationLogRepository,
+)
+from app.pipeline.pipeline import VerificationPipeline
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# In-memory stores (replace with real DB in production)
-# ---------------------------------------------------------------------------
-
-_users_db: dict[str, dict[str, Any]] = {}
-_templates_db: dict[str, list[dict[str, Any]]] = {}  # user_id -> templates
-_logs_db: list[dict[str, Any]] = []
 
 
 # ---------------------------------------------------------------------------
@@ -37,8 +44,8 @@ _logs_db: list[dict[str, Any]] = []
 class EnrollResult:
     def __init__(
         self,
-        user_id: str,
-        finger: str,
+        user_id: int,
+        finger: int,
         quality_score: float,
         template_count: int,
         success: bool = True,
@@ -58,7 +65,7 @@ class VerifyResult:
         matched: bool,
         score: float,
         threshold: float,
-        user_id: str,
+        user_id: Optional[int],
         latency_ms: float,
     ):
         self.matched = matched
@@ -71,7 +78,7 @@ class VerifyResult:
 class IdentifyResult:
     def __init__(
         self,
-        user_id: str,
+        user_id: int,
         employee_id: str,
         full_name: str,
         score: float,
@@ -88,19 +95,27 @@ class IdentifyResult:
 
 
 class PipelineService:
-    """Wraps fingerprint pipeline operations in an async interface.
+    """Bridges VerificationPipeline, sensor, and database in an async interface.
 
-    Uses singleton pattern to ensure pipeline is initialized only once.
+    Uses singleton pattern to ensure resources are initialized only once.
     """
 
     _instance: PipelineService | None = None
 
     def __init__(self) -> None:
         self._settings = get_settings()
+        self._pipeline: VerificationPipeline | None = None
         self._active_model: str | None = None
         self._model_loaded: bool = False
         self._start_time: float = time.time()
         self._lock = asyncio.Lock()
+
+        # DB components (initialized in initialize())
+        self._db: DatabaseManager | None = None
+        self._user_repo: UserRepository | None = None
+        self._fp_repo: FingerprintRepository | None = None
+        self._log_repo: VerificationLogRepository | None = None
+        self._crypto: CryptoService | None = None
 
     # -- singleton access ----------------------------------------------------
 
@@ -113,23 +128,102 @@ class PipelineService:
     # -- lifecycle -----------------------------------------------------------
 
     async def initialize(self) -> None:
-        """Load active model and build index on startup."""
+        """Load model, init DB, build FAISS index from saved embeddings."""
         logger.info("Initializing PipelineService...")
-        model_dir = Path(self._settings.model_dir)
-        if model_dir.exists():
-            # Prioritize TensorRT, fallback to ONNX
-            trt_files = list(model_dir.glob("*.trt")) + list(model_dir.glob("*.engine"))
-            onnx_files = list(model_dir.glob("*.onnx"))
-            candidates = trt_files or onnx_files
-            if candidates:
-                self._active_model = candidates[0].name
-                self._model_loaded = True
-                logger.info("Loaded model: %s", self._active_model)
+
+        # --- Database ---
+        try:
+            db_path = str(Path(self._settings.data_dir) / "fingerprint.db")
+            self._db = DatabaseManager(db_path)
+            self._user_repo = UserRepository(self._db)
+            self._fp_repo = FingerprintRepository(self._db)
+            self._log_repo = VerificationLogRepository(self._db)
+            logger.info("Database repositories ready.")
+        except Exception as exc:
+            logger.error("Database init failed: %s", exc)
+
+        # --- Crypto ---
+        try:
+            self._crypto = CryptoService()
+        except Exception as exc:
+            logger.warning("CryptoService init failed: %s (embeddings won't be encrypted)", exc)
+
+        # --- Pipeline ---
+        pipeline_cfg = self._settings.as_pipeline_config()
+        self._pipeline = VerificationPipeline(pipeline_cfg)
+
+        # Determine which model loaded
+        model_path = self._settings.model_path
+        if model_path and Path(model_path).exists():
+            self._active_model = Path(model_path).name
+            self._model_loaded = True
+            logger.info("Model loaded: %s", self._active_model)
+        else:
+            # Fallback: scan model_dir
+            model_dir = Path(self._settings.model_dir)
+            if model_dir.exists():
+                trt_files = list(model_dir.glob("*.trt")) + list(model_dir.glob("*.engine"))
+                onnx_files = list(model_dir.glob("*.onnx"))
+                candidates = trt_files or onnx_files
+                if candidates:
+                    self._active_model = candidates[0].name
+                    self._model_loaded = True
+                    logger.info("Model loaded (scanned): %s", self._active_model)
+
+        # --- Build FAISS index from DB ---
+        await self._rebuild_faiss_index()
+
         logger.info("PipelineService ready. Active model=%s", self._active_model)
+
+    async def _rebuild_faiss_index(self) -> None:
+        """Load all active fingerprint embeddings from DB and build FAISS gallery."""
+        if self._fp_repo is None or self._pipeline is None:
+            return
+
+        try:
+            rows = self._fp_repo.get_active_embeddings()
+            if not rows:
+                logger.info("No fingerprints in DB — FAISS index is empty.")
+                return
+
+            embeddings = []
+            ids = []
+            for fp_id, user_id, embedding_enc in rows:
+                if embedding_enc is None:
+                    continue
+                try:
+                    if self._crypto is not None:
+                        vec = self._crypto.decrypt_embedding(embedding_enc)
+                    else:
+                        import struct
+                        vec = list(struct.unpack("<{}f".format(EMBEDDING_DIM), embedding_enc))
+                    embeddings.append(vec)
+                    ids.append(fp_id)
+                except Exception as exc:
+                    logger.warning("Failed to decrypt embedding fp_id=%d: %s", fp_id, exc)
+
+            if embeddings:
+                emb_array = np.array(embeddings, dtype=np.float32)
+                id_array = np.array(ids, dtype=np.int64)
+                self._pipeline.build_gallery(emb_array, id_array)
+                logger.info("FAISS index built with %d embeddings.", len(embeddings))
+            else:
+                logger.info("No valid embeddings found — FAISS index is empty.")
+
+        except Exception as exc:
+            logger.error("Failed to build FAISS index: %s", exc)
 
     async def shutdown(self) -> None:
         logger.info("Shutting down PipelineService.")
         self._model_loaded = False
+        # Save FAISS index
+        if self._pipeline is not None:
+            try:
+                gallery_path = str(Path(self._settings.data_dir) / "gallery.faiss")
+                self._pipeline.save_gallery(gallery_path)
+                logger.info("FAISS gallery saved.")
+            except Exception as exc:
+                logger.warning("Failed to save FAISS gallery: %s", exc)
 
     # -- properties ----------------------------------------------------------
 
@@ -145,28 +239,27 @@ class PipelineService:
     def uptime_seconds(self) -> float:
         return time.time() - self._start_time
 
-    # -- user management (in-memory) -----------------------------------------
+    # -- user management (SQLite) --------------------------------------------
 
     async def create_user(self, user_data: dict[str, Any]) -> dict[str, Any]:
-        user_id = str(uuid.uuid4())
-        now_iso = time.time()
-        user = {
-            "id": user_id,
-            "employee_id": user_data["employee_id"],
-            "full_name": user_data["full_name"],
-            "department": user_data.get("department", ""),
-            "role": user_data.get("role", "employee"),
-            "is_active": True,
-            "enrolled_fingers": [],
-            "created_at": now_iso,
-            "updated_at": now_iso,
-        }
-        _users_db[user_id] = user
-        _templates_db[user_id] = []
-        return user
+        if self._user_repo is None:
+            raise RuntimeError("Database not initialized")
+        user = User(
+            employee_id=user_data["employee_id"],
+            full_name=user_data["full_name"],
+            department=user_data.get("department", ""),
+            role=user_data.get("role", "user"),
+        )
+        loop = asyncio.get_running_loop()
+        created = await loop.run_in_executor(None, self._user_repo.create, user)
+        return created.to_dict()
 
-    async def get_user(self, user_id: str) -> dict[str, Any] | None:
-        return _users_db.get(user_id)
+    async def get_user(self, user_id: int) -> dict[str, Any] | None:
+        if self._user_repo is None:
+            return None
+        loop = asyncio.get_running_loop()
+        user = await loop.run_in_executor(None, self._user_repo.get_by_id, user_id)
+        return user.to_dict() if user else None
 
     async def list_users(
         self,
@@ -176,135 +269,300 @@ class PipelineService:
         department: str | None = None,
         role: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
-        users = list(_users_db.values())
-        if search:
-            q = search.lower()
-            users = [
-                u
-                for u in users
-                if q in u["full_name"].lower() or q in u["employee_id"].lower()
-            ]
-        if department:
-            users = [u for u in users if u["department"] == department]
-        if role:
-            users = [u for u in users if u["role"] == role]
-        users = [u for u in users if u["is_active"]]
-        total = len(users)
-        start = (page - 1) * limit
-        return users[start : start + limit], total
+        if self._user_repo is None:
+            return [], 0
 
-    async def update_user(self, user_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
-        user = _users_db.get(user_id)
+        loop = asyncio.get_running_loop()
+
+        if search:
+            all_users = await loop.run_in_executor(
+                None, self._user_repo.search, search, True
+            )
+        else:
+            all_users = await loop.run_in_executor(
+                None, self._user_repo.get_all, True
+            )
+
+        # Apply additional filters
+        if department:
+            all_users = [u for u in all_users if u.department == department]
+        if role:
+            all_users = [u for u in all_users if u.role == role]
+
+        total = len(all_users)
+        start = (page - 1) * limit
+        page_users = all_users[start: start + limit]
+
+        # Enrich with fingerprint count
+        result = []
+        for u in page_users:
+            d = u.to_dict()
+            if self._fp_repo is not None:
+                count = await loop.run_in_executor(
+                    None, self._fp_repo.count_by_user, u.id, True
+                )
+                d["fingerprint_count"] = count
+            result.append(d)
+
+        return result, total
+
+    async def update_user(
+        self, user_id: int, updates: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        if self._user_repo is None:
+            return None
+        loop = asyncio.get_running_loop()
+        user = await loop.run_in_executor(None, self._user_repo.get_by_id, user_id)
         if user is None:
             return None
-        for key, value in updates.items():
-            if value is not None and key in user:
-                user[key] = value
-        user["updated_at"] = time.time()
-        return user
+        updated = user.with_updates(**{k: v for k, v in updates.items() if v is not None})
+        await loop.run_in_executor(None, self._user_repo.update, updated)
+        return updated.to_dict()
 
-    async def deactivate_user(self, user_id: str) -> bool:
-        user = _users_db.get(user_id)
-        if user is None:
+    async def deactivate_user(self, user_id: int) -> bool:
+        if self._user_repo is None:
             return False
-        user["is_active"] = False
-        _templates_db.pop(user_id, None)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._user_repo.deactivate, user_id)
+        # Also deactivate fingerprints and rebuild FAISS
+        if self._fp_repo is not None:
+            await loop.run_in_executor(None, self._fp_repo.deactivate_by_user, user_id)
+        await self._rebuild_faiss_index()
         return True
 
     # -- enrollment ----------------------------------------------------------
 
     async def enroll_user(
         self,
-        user_id: str,
-        finger: str,
+        user_id: int,
+        finger: int,
         num_samples: int = 3,
+        image_bytes: bytes | None = None,
     ) -> EnrollResult:
-        """
-        Captures ``num_samples`` images from sensor, extracts templates,
-        and saves them to the user record.
+        """Enroll a fingerprint using sensor capture or provided image bytes.
+
+        Args:
+            user_id: Database user ID.
+            finger: Finger index (0-9).
+            num_samples: Number of samples to capture (only first used for now).
+            image_bytes: Optional pre-captured image bytes (for mock/remote use).
         """
         async with self._lock:
-            user = _users_db.get(user_id)
-            if user is None:
+            # Validate user exists
+            user = None
+            if self._user_repo is not None:
+                loop = asyncio.get_running_loop()
+                user_obj = await loop.run_in_executor(
+                    None, self._user_repo.get_by_id, user_id
+                )
+                if user_obj is None:
+                    return EnrollResult(
+                        user_id=user_id, finger=finger,
+                        quality_score=0.0, template_count=0,
+                        success=False, message="User not found",
+                    )
+                user = user_obj
+
+            # Capture image from sensor or use provided bytes
+            if image_bytes is None:
+                from app.services.sensor_service import SensorService
+                sensor = SensorService.get_instance()
+                capture = await sensor.capture_image()
+                if not capture.success:
+                    return EnrollResult(
+                        user_id=user_id, finger=finger,
+                        quality_score=0.0, template_count=0,
+                        success=False, message="Sensor capture failed: {}".format(capture.error),
+                    )
+                image_bytes = capture.image_data
+                quality = capture.quality_score
+            else:
+                quality = 50.0  # default quality for pre-captured images
+
+            # Run pipeline to extract embedding
+            if self._pipeline is None:
                 return EnrollResult(
-                    user_id=user_id,
-                    finger=finger,
-                    quality_score=0.0,
-                    template_count=0,
-                    success=False,
-                    message="User not found",
+                    user_id=user_id, finger=finger,
+                    quality_score=quality, template_count=0,
+                    success=False, message="Pipeline not initialized",
                 )
 
-            # Simulate capture + template extraction
-            await asyncio.sleep(0.1)
-            quality = round(0.75 + 0.2 * (hash(user_id + finger) % 100) / 100, 3)
-            template = {
-                "finger": finger,
-                "embedding": np.random.randn(512).tolist(),
-                "quality": quality,
-                "enrolled_at": time.time(),
-            }
+            try:
+                embedding, profiling = await self._pipeline.extract_embedding(image_bytes)
+            except Exception as exc:
+                logger.error("Pipeline inference failed: %s", exc)
+                return EnrollResult(
+                    user_id=user_id, finger=finger,
+                    quality_score=quality, template_count=0,
+                    success=False, message="Inference failed: {}".format(exc),
+                )
 
-            if user_id not in _templates_db:
-                _templates_db[user_id] = []
-            _templates_db[user_id].append(template)
+            # Check if embedding is all-zero (no minutiae detected)
+            if np.allclose(embedding, 0.0):
+                return EnrollResult(
+                    user_id=user_id, finger=finger,
+                    quality_score=quality, template_count=0,
+                    success=False, message="No minutiae detected in image",
+                )
 
-            finger_entry = {
-                "finger": finger,
-                "enrolled_at": time.time(),
-                "quality_score": quality,
-            }
-            if not any(f["finger"] == finger for f in user["enrolled_fingers"]):
-                user["enrolled_fingers"].append(finger_entry)
+            # Encrypt and save to DB
+            embedding_list = embedding.tolist()
+            image_hash = Fingerprint.compute_image_hash(image_bytes)
 
-            _log_event(user_id, user["employee_id"], "enroll", "accept", quality, 100.0)
+            embedding_enc = None
+            if self._crypto is not None:
+                embedding_enc = self._crypto.encrypt_embedding(embedding_list)
+            else:
+                import struct
+                embedding_enc = struct.pack("<{}f".format(EMBEDDING_DIM), *embedding_list)
+
+            fp_record = Fingerprint(
+                user_id=user_id,
+                finger_index=finger,
+                embedding_enc=embedding_enc,
+                quality_score=quality,
+                image_hash=image_hash,
+            )
+
+            if self._fp_repo is not None:
+                loop = asyncio.get_running_loop()
+                saved_fp = await loop.run_in_executor(None, self._fp_repo.create, fp_record)
+                fp_id = saved_fp.id
+
+                # Add to FAISS index
+                self._pipeline.enroll(embedding, fp_id)
+
+                # Get total fingerprint count for this user
+                count = await loop.run_in_executor(
+                    None, self._fp_repo.count_by_user, user_id, True
+                )
+            else:
+                count = 1
+
+            logger.info(
+                "Enrolled fingerprint for user %d, finger %d (quality=%.1f)",
+                user_id, finger, quality,
+            )
 
             return EnrollResult(
                 user_id=user_id,
                 finger=finger,
                 quality_score=quality,
-                template_count=len(_templates_db[user_id]),
+                template_count=count,
             )
 
     # -- verification (1:1) -------------------------------------------------
 
-    async def verify_1to1(self, user_id: str) -> VerifyResult:
+    async def verify_1to1(
+        self,
+        user_id: int,
+        image_bytes: bytes | None = None,
+    ) -> VerifyResult:
+        """1:1 verification against a specific user's stored embeddings."""
         start = time.perf_counter()
         threshold = self._settings.verify_threshold
 
-        user = _users_db.get(user_id)
-        if user is None:
+        # Capture image
+        if image_bytes is None:
+            from app.services.sensor_service import SensorService
+            sensor = SensorService.get_instance()
+            capture = await sensor.capture_image()
+            if not capture.success:
+                elapsed = (time.perf_counter() - start) * 1000
+                return VerifyResult(
+                    matched=False, score=0.0, threshold=threshold,
+                    user_id=user_id, latency_ms=round(elapsed, 2),
+                )
+            image_bytes = capture.image_data
+            probe_quality = capture.quality_score
+        else:
+            probe_quality = 50.0
+
+        # Extract probe embedding
+        if self._pipeline is None:
             elapsed = (time.perf_counter() - start) * 1000
             return VerifyResult(
-                matched=False,
-                score=0.0,
-                threshold=threshold,
-                user_id=user_id,
-                latency_ms=round(elapsed, 2),
+                matched=False, score=0.0, threshold=threshold,
+                user_id=user_id, latency_ms=round(elapsed, 2),
             )
 
-        templates = _templates_db.get(user_id, [])
-        if not templates:
+        try:
+            probe_emb, _ = await self._pipeline.extract_embedding(image_bytes)
+        except Exception as exc:
+            logger.error("Verify inference failed: %s", exc)
             elapsed = (time.perf_counter() - start) * 1000
             return VerifyResult(
-                matched=False,
-                score=0.0,
-                threshold=threshold,
-                user_id=user_id,
-                latency_ms=round(elapsed, 2),
+                matched=False, score=0.0, threshold=threshold,
+                user_id=user_id, latency_ms=round(elapsed, 2),
             )
 
-        await asyncio.sleep(0.05)
-        score = round(0.4 + 0.55 * (hash(user_id + str(time.time_ns())) % 100) / 100, 4)
-        matched = score >= threshold
+        # Load user's stored embeddings from DB
+        if self._fp_repo is None:
+            elapsed = (time.perf_counter() - start) * 1000
+            return VerifyResult(
+                matched=False, score=0.0, threshold=threshold,
+                user_id=user_id, latency_ms=round(elapsed, 2),
+            )
 
+        loop = asyncio.get_running_loop()
+        fps = await loop.run_in_executor(
+            None, self._fp_repo.get_by_user_id, user_id, True
+        )
+        if not fps:
+            elapsed = (time.perf_counter() - start) * 1000
+            return VerifyResult(
+                matched=False, score=0.0, threshold=threshold,
+                user_id=user_id, latency_ms=round(elapsed, 2),
+            )
+
+        # Compare probe with each stored embedding, take best score
+        best_score = 0.0
+        matched_fp_id = None
+        for fp in fps:
+            if fp.embedding_enc is None:
+                continue
+            try:
+                if self._crypto is not None:
+                    gallery_vec = self._crypto.decrypt_embedding(fp.embedding_enc)
+                else:
+                    import struct
+                    gallery_vec = list(struct.unpack(
+                        "<{}f".format(EMBEDDING_DIM), fp.embedding_enc
+                    ))
+                gallery_emb = np.array(gallery_vec, dtype=np.float32)
+                score = float(np.dot(probe_emb, gallery_emb))
+                if score > best_score:
+                    best_score = score
+                    matched_fp_id = fp.id
+            except Exception as exc:
+                logger.warning("Failed to compare with fp_id=%s: %s", fp.id, exc)
+
+        matched = best_score >= threshold
         elapsed = (time.perf_counter() - start) * 1000
-        decision = "accept" if matched else "reject"
-        _log_event(user_id, user["employee_id"], "verify", decision, score, round(elapsed, 2))
+
+        # Log result
+        decision = VerificationDecision.ACCEPT if matched else VerificationDecision.REJECT
+        if self._log_repo is not None:
+            log = VerificationLog(
+                matched_user_id=user_id if matched else None,
+                matched_fp_id=matched_fp_id if matched else None,
+                mode=VerificationMode.VERIFY.value,
+                score=best_score,
+                decision=decision.value,
+                latency_ms=round(elapsed, 2),
+                device_id=self._settings.device_id,
+                probe_quality=probe_quality,
+            )
+            await loop.run_in_executor(None, self._log_repo.create, log)
+
+        logger.info(
+            "Verify 1:1: user=%d score=%.4f threshold=%.4f matched=%s (%.1fms)",
+            user_id, best_score, threshold, matched, elapsed,
+        )
 
         return VerifyResult(
             matched=matched,
-            score=score,
+            score=best_score,
             threshold=threshold,
             user_id=user_id,
             latency_ms=round(elapsed, 2),
@@ -312,126 +570,160 @@ class PipelineService:
 
     # -- identification (1:N) -----------------------------------------------
 
-    async def identify_1toN(self, top_k: int | None = None) -> list[IdentifyResult]:
+    async def identify_1toN(
+        self,
+        top_k: int | None = None,
+        image_bytes: bytes | None = None,
+    ) -> list[IdentifyResult]:
+        """1:N identification — search FAISS gallery for the best match."""
         top_k = top_k or self._settings.identify_top_k
         threshold = self._settings.identify_threshold
+        start = time.perf_counter()
 
-        await asyncio.sleep(0.08)
+        # Capture image
+        if image_bytes is None:
+            from app.services.sensor_service import SensorService
+            sensor = SensorService.get_instance()
+            capture = await sensor.capture_image()
+            if not capture.success:
+                return []
+            image_bytes = capture.image_data
+            probe_quality = capture.quality_score
+        else:
+            probe_quality = 50.0
+
+        if self._pipeline is None:
+            return []
+
+        # Run identify through pipeline's FAISS search
+        try:
+            matches = await self._pipeline.identify(
+                image_bytes, top_k=top_k, threshold=threshold
+            )
+        except Exception as exc:
+            logger.error("Identify inference failed: %s", exc)
+            return []
+
+        elapsed = (time.perf_counter() - start) * 1000
+
+        # Map fp_id → user info from DB
         results: list[IdentifyResult] = []
-        for uid, user in _users_db.items():
-            if not user["is_active"]:
-                continue
-            templates = _templates_db.get(uid, [])
-            if not templates:
-                continue
-            score = round(0.3 + 0.65 * (hash(uid + str(time.time_ns())) % 100) / 100, 4)
-            if score >= threshold:
-                results.append(
-                    IdentifyResult(
-                        user_id=uid,
-                        employee_id=user["employee_id"],
-                        full_name=user["full_name"],
-                        score=score,
-                    )
+        if self._fp_repo is not None and self._user_repo is not None:
+            loop = asyncio.get_running_loop()
+            for fp_id, score in matches:
+                fp = await loop.run_in_executor(None, self._fp_repo.get_by_id, fp_id)
+                if fp is None:
+                    continue
+                user = await loop.run_in_executor(
+                    None, self._user_repo.get_by_id, fp.user_id
                 )
+                if user is None:
+                    continue
+                results.append(IdentifyResult(
+                    user_id=user.id,
+                    employee_id=user.employee_id,
+                    full_name=user.full_name,
+                    score=score,
+                ))
 
-        results.sort(key=lambda r: r.score, reverse=True)
-        results = results[:top_k]
+        # Log best match
+        if self._log_repo is not None:
+            best = results[0] if results else None
+            decision = VerificationDecision.ACCEPT if best else VerificationDecision.REJECT
+            loop = asyncio.get_running_loop()
+            log = VerificationLog(
+                matched_user_id=best.user_id if best else None,
+                mode=VerificationMode.IDENTIFY.value,
+                score=best.score if best else 0.0,
+                decision=decision.value,
+                latency_ms=round(elapsed, 2),
+                device_id=self._settings.device_id,
+                probe_quality=probe_quality,
+            )
+            await loop.run_in_executor(None, self._log_repo.create, log)
 
-        action_decision = "accept" if results else "reject"
-        best_uid = results[0].user_id if results else None
-        best_eid = results[0].employee_id if results else None
-        best_score = results[0].score if results else 0.0
-        _log_event(best_uid, best_eid, "identify", action_decision, best_score, 80.0)
-
+        logger.info(
+            "Identify 1:N: %d matches above %.2f (%.1fms)",
+            len(results), threshold, elapsed,
+        )
         return results
 
     # -- profiling -----------------------------------------------------------
 
     async def get_profiling(self) -> dict[str, Any]:
+        user_count = 0
+        fp_count = 0
+        log_count = 0
+        if self._user_repo is not None:
+            loop = asyncio.get_running_loop()
+            user_count = await loop.run_in_executor(None, self._user_repo.count, True)
+        if self._fp_repo is not None:
+            loop = asyncio.get_running_loop()
+            fp_count = await loop.run_in_executor(None, self._fp_repo.count, True)
+        if self._log_repo is not None:
+            loop = asyncio.get_running_loop()
+            log_count = await loop.run_in_executor(None, self._log_repo.count)
+
+        pipeline_profiling = {}
+        if self._pipeline is not None:
+            pipeline_profiling = self._pipeline.get_profiling()
+
         return {
             "active_model": self._active_model,
             "model_loaded": self._model_loaded,
             "uptime_seconds": self.uptime_seconds,
-            "total_users": len(_users_db),
-            "total_templates": sum(len(t) for t in _templates_db.values()),
-            "total_logs": len(_logs_db),
+            "total_users": user_count,
+            "total_fingerprints": fp_count,
+            "total_logs": log_count,
+            "pipeline_stages": pipeline_profiling,
         }
 
-    # -- log access ----------------------------------------------------------
+    # -- log / stats access --------------------------------------------------
 
     async def get_logs(
         self,
         page: int = 1,
         limit: int = 50,
-        user_id: str | None = None,
+        user_id: int | None = None,
         action: str | None = None,
         decision: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
-        logs = list(reversed(_logs_db))  # newest first
-        if user_id:
-            logs = [l for l in logs if l.get("user_id") == user_id]
+        if self._log_repo is None:
+            return [], 0
+
+        loop = asyncio.get_running_loop()
+        if user_id is not None:
+            logs = await loop.run_in_executor(
+                None, self._log_repo.get_by_user, user_id, limit * page
+            )
+        else:
+            logs = await loop.run_in_executor(
+                None, self._log_repo.get_recent, limit * page
+            )
+
+        # Apply filters
+        log_dicts = [l.to_dict() for l in logs]
         if action:
-            logs = [l for l in logs if l.get("action") == action]
+            log_dicts = [l for l in log_dicts if l.get("mode") == action]
         if decision:
-            logs = [l for l in logs if l.get("decision") == decision]
-        total = len(logs)
-        start = (page - 1) * limit
-        return logs[start : start + limit], total
+            log_dicts = [l for l in log_dicts if l.get("decision") == decision]
+
+        total = len(log_dicts)
+        start_idx = (page - 1) * limit
+        return log_dicts[start_idx: start_idx + limit], total
 
     async def get_stats(self) -> dict[str, Any]:
-        from datetime import datetime, timezone
-
-        today_start = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ).timestamp()
-
-        today_logs = [l for l in _logs_db if l["timestamp"] >= today_start]
-        verify_today = [l for l in today_logs if l["action"] in ("verify", "identify")]
-        accepts = [l for l in verify_today if l["decision"] == "accept"]
-        latencies = [l["latency_ms"] for l in verify_today if l.get("latency_ms")]
-
-        total_v = len(verify_today) or 1
+        info = await self.get_profiling()
         return {
-            "enrolled_users": sum(1 for u in _users_db.values() if u["is_active"]),
-            "enrolled_fingers": sum(len(t) for t in _templates_db.values()),
-            "verifications_today": len([l for l in today_logs if l["action"] == "verify"]),
-            "identifications_today": len([l for l in today_logs if l["action"] == "identify"]),
-            "acceptance_rate": round(len(accepts) / total_v, 4),
-            "rejection_rate": round(1 - len(accepts) / total_v, 4),
-            "avg_latency_ms": round(sum(latencies) / len(latencies), 2) if latencies else 0.0,
-            "uptime_seconds": self.uptime_seconds,
+            "enrolled_users": info["total_users"],
+            "enrolled_fingerprints": info["total_fingerprints"],
+            "total_logs": info["total_logs"],
+            "active_model": info["active_model"],
+            "model_loaded": info["model_loaded"],
+            "uptime_seconds": info["uptime_seconds"],
         }
-
-
-# ---------------------------------------------------------------------------
-# Module-level helpers
-# ---------------------------------------------------------------------------
-
-
-def _log_event(
-    user_id: str | None,
-    employee_id: str | None,
-    action: str,
-    decision: str,
-    score: float | None,
-    latency_ms: float | None,
-) -> None:
-    _logs_db.append(
-        {
-            "id": str(uuid.uuid4()),
-            "timestamp": time.time(),
-            "user_id": user_id,
-            "employee_id": employee_id,
-            "action": action,
-            "decision": decision,
-            "score": score,
-            "latency_ms": latency_ms,
-            "details": None,
-        }
-    )
 
 
 # ---------------------------------------------------------------------------

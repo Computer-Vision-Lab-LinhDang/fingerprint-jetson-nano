@@ -109,6 +109,14 @@ class Settings(BaseSettings):
         default="/opt/fingerprint-sdk",
         description="Path to sensor SDK",
     )
+    mock_mode: bool = Field(
+        default=False,
+        description="Use mock sensor instead of real hardware (loads data/sample/*.tif)",
+    )
+    sample_dir: str = Field(
+        default="data/sample",
+        description="Directory containing sample fingerprint images for mock mode",
+    )
 
     # -------------------------------------------------------------------------
     # CORS — allowed origins to access API

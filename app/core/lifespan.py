@@ -71,8 +71,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         vid=settings.sensor_vid,
         pid=settings.sensor_pid,
         sdk_path=settings.sensor_sdk_path,
+        use_mock=settings.mock_mode,
     )
-    if hardware_connected:
+    if settings.mock_mode:
+        logger.info("Mock mode enabled — using sample fingerprint images.")
+    elif hardware_connected:
         logger.info("USB sensor connected successfully.")
     else:
         logger.warning("USB sensor not found - using Mock sensor.")
