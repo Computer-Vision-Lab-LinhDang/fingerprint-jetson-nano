@@ -13,8 +13,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic import BaseSettings, Field, validator
 
 
 class Settings(BaseSettings):
@@ -97,7 +96,7 @@ class Settings(BaseSettings):
     sensor_vid: int = Field(default=0x0483, description="USB Vendor ID of the sensor")
     sensor_pid: int = Field(default=0x5720, description="USB Product ID of the sensor")
 
-    @field_validator("sensor_vid", "sensor_pid", mode="before")
+    @validator("sensor_vid", "sensor_pid", pre=True)
     @classmethod
     def _parse_hex_int(cls, v):
         if isinstance(v, int):
@@ -157,12 +156,11 @@ class Settings(BaseSettings):
         description="Fernet key for encrypting embeddings. Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'",
     )
 
-    model_config = {
-        "env_prefix": "WORKER_",
-        "env_file": ".env",
-        "env_file_encoding": "utf-8",
-        "extra": "ignore",
-    }
+    class Config:
+        env_prefix = "WORKER_"
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        extra = "ignore"
 
     def as_pipeline_config(self) -> dict:
         """

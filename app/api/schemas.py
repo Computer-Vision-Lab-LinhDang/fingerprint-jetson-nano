@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, validator
 
 
 # ---------------------------------------------------------------------------
@@ -28,7 +28,8 @@ class ApiResponse(BaseModel, Generic[DataT]):
     error: str | None = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        orm_mode = True
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +68,7 @@ class UserCreate(BaseModel):
     department: str = Field(default="", max_length=100)
     role: RoleLiteral = Field(default="user")
 
-    @field_validator("role", mode="before")
+    @validator("role", pre=True)
     @classmethod
     def normalize_role(cls, value):
         if value == "employee":
@@ -80,7 +81,7 @@ class UserUpdate(BaseModel):
     department: str | None = None
     role: RoleLiteral | None = None
 
-    @field_validator("role", mode="before")
+    @validator("role", pre=True)
     @classmethod
     def normalize_role(cls, value):
         if value == "employee":
@@ -106,7 +107,8 @@ class UserResponse(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        orm_mode = True
 
 
 class UserListResponse(BaseModel):
