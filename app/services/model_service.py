@@ -177,27 +177,67 @@ class ModelService:
             raise ValueError("Only ONNX models can be converted to TensorRT")
 
         src = self._model_dir / info["filename"]
-        dst_name = src.stem + f"_{precision}.trt"
+        dst_name = src.stem + f"_{precision}.engine"
         dst = self._model_dir / dst_name
 
         logger.info(
             "Converting %s -> %s (precision=%s, batch=%d)",
-            src.name,
-            dst_name,
-            precision,
-            max_batch_size,
+            src.name, dst_name, precision, max_batch_size,
         )
 
-        # TODO: replace with subprocess trtexec when running on Jetson Nano
-        await asyncio.sleep(2.0)
+        # Find trtexec on Jetson Nano
+        import shutil
+        import subprocess
+        trtexec_paths = [
+            "/usr/src/tensorrt/bin/trtexec",
+            "/usr/local/bin/trtexec",
+            shutil.which("trtexec") or "",
+        ]
+        trtexec_bin = next((p for p in trtexec_paths if p and os.path.exists(p)), None)
 
-        await asyncio.to_thread(dst.write_bytes, b"TRT_PLACEHOLDER")
+        if trtexec_bin is None:
+            raise RuntimeError(
+                "trtexec not found on this system. "
+                "Install TensorRT or use ONNX Runtime fallback."
+            )
+
+        cmd = [
+            trtexec_bin,
+            f"--onnx={src}",
+            f"--saveEngine={dst}",
+            f"--maxBatch={max_batch_size}",
+        ]
+        if precision == "fp16":
+            cmd.append("--fp16")
+        elif precision == "int8":
+            cmd.append("--int8")
+
+        logger.info("Running: %s", " ".join(cmd))
+
+        loop = asyncio.get_event_loop()
+        proc = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+        )
+
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"trtexec failed (code {proc.returncode}):\n{proc.stderr[-2000:]}"
+            )
+
+        if not dst.exists():
+            raise RuntimeError(f"trtexec succeeded but output file not found: {dst}")
 
         new_id = _path_to_id(dst)
         new_info = {
             "id": new_id,
             "filename": dst_name,
-            "format": "trt",
+            "format": "engine",
             "size_mb": round(dst.stat().st_size / (1024 * 1024), 2),
             "is_active": False,
             "created_at": dst.stat().st_ctime,
