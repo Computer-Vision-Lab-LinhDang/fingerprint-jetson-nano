@@ -1136,5 +1136,5 @@ class PipelineService:
 # ---------------------------------------------------------------------------
 
 
-def get_pipeline_service() -> "PipelineService":
+async def get_pipeline_service() -> "PipelineService":
     return PipelineService.get_instance()
