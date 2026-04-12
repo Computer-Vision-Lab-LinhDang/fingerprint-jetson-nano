@@ -4,10 +4,6 @@
 from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Callable, Generator, Iterable, AsyncIterator, TypeVar, Type, Awaitable, Sequence, Mapping
 import logging
 from datetime import datetime, timezone
-try:
-    from typing import Annotated
-except ImportError:
-    
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File
 
 from app.api.schemas import (

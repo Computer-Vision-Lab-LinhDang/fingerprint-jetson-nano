@@ -7,10 +7,6 @@ from datetime import datetime, timezone
 
 from dateutil.parser import isoparse
 
-try:
-    from typing import Annotated
-except ImportError:
-    
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.schemas import (

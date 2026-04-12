@@ -5,10 +5,6 @@ from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Call
 import math
 from datetime import datetime, timezone
 
-try:
-    from typing import Annotated
-except ImportError:
-    
 from fastapi import APIRouter, Depends, HTTPException, Query
 from dateutil.parser import isoparse
 
