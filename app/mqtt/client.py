@@ -217,8 +217,8 @@ class MQTTWorkerClient:
     def _send_heartbeat(self, status: WorkerStatus = WorkerStatus.IDLE) -> None:
         # Gather loaded models info
         try:
-            from app.services.model_service import get_model_service
-            loaded_models = ModelService.get_instance().loaded_models
+            from app.services.model_service import get_model_service_sync
+            loaded_models = get_model_service_sync().loaded_models
         except Exception:
             loaded_models = {}
 
