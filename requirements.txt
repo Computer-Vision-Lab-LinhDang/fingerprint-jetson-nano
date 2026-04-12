@@ -4,11 +4,11 @@
 
 # --- Web framework & server ------------------------------------------------
 fastapi==0.83.0
-uvicorn[standard]==0.16.0
+uvicorn[standard]>=0.20.0,<1.0.0
 
 # --- Async / networking ----------------------------------------------------
 asyncssh>=2.5.0,<3.0.0
-websockets>=8.0,<10.0
+websockets>=10.0,<14.0
 aiofiles>=0.8.0,<1.0.0
 
 # --- Data validation -------------------------------------------------------
