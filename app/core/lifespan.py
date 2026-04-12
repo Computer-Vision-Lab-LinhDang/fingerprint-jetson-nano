@@ -6,7 +6,11 @@ Separated from main.py for readability and easier testing.
 
 
 import logging
-from contextlib import asynccontextmanager
+try:
+    from contextlib import asynccontextmanager
+except ImportError:
+    from async_generator import asynccontextmanager
+
 from pathlib import Path
 from typing import List, Optional, AsyncIterator
 
