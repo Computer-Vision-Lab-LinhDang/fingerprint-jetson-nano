@@ -32,7 +32,7 @@ async def startup(app: FastAPI) -> None:
     logger.info("=== Fingerprint Jetson Nano Worker starting up ===")
     logger.info("Device ID: %s", settings.device_id)
     logger.info("Inference backend: %s", settings.backend)
-    logger.info("Model path: %s", settings.model_path)
+    logger.info("Configured fallback model path: %s", settings.model_path)
 
     # ------------------------------------------------------------------
     # Step 1: Create necessary directories
