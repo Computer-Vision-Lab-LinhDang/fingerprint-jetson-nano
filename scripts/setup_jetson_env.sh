@@ -44,7 +44,7 @@ if python3 -c "import faiss" &> /dev/null; then
 else
     echo "Bắt đầu tải và biên dịch FAISS..."
     rm -rf $FAISS_DIR
-    git clone https://github.com/facebookresearch/faiss.git $FAISS_DIR
+    git clone --branch v1.7.4 --depth 1 https://github.com/facebookresearch/faiss.git $FAISS_DIR
     cd $FAISS_DIR
 
     echo "Tải CMake 3.24.3 dành riêng cho FAISS (Ubuntu 18 mặc định chỉ có 3.10)..."
@@ -54,11 +54,17 @@ else
     /tmp/cmake.sh --skip-license --prefix=/tmp/cmake_bin
     export PATH=/tmp/cmake_bin/bin:$PATH
 
+    echo "Định tuyến bộ thư viện C++ của Python..."
+    PY_INC=$(python3 -c "import sysconfig; print(sysconfig.get_path('include'))")
+    NUMPY_INC=$(python3 -c "import numpy as np; print(np.get_include())")
+
     # Chỉ định CMake dùng Python3 của VENV
     cmake -B build \
           -DFAISS_ENABLE_GPU=OFF \
           -DFAISS_ENABLE_PYTHON=ON \
-          -DPython_EXECUTABLE=$(which python3) .
+          -DPython_EXECUTABLE=$(which python3) \
+          -DPython_INCLUDE_DIR=$PY_INC \
+          -DPython_NumPy_INCLUDE_DIRS=$NUMPY_INC .
 
     make -C build -j$(nproc) faiss swigfaiss
     cd build/faiss/python
