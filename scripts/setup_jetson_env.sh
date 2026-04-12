@@ -47,6 +47,12 @@ else
     git clone https://github.com/facebookresearch/faiss.git $FAISS_DIR
     cd $FAISS_DIR
 
+    echo "Tải CMake 3.24.3 dành riêng cho FAISS (Ubuntu 18 mặc định chỉ có 3.10)..."
+    wget -q https://github.com/Kitware/CMake/releases/download/v3.24.3/cmake-3.24.3-linux-aarch64.sh -O /tmp/cmake.sh
+    chmod +x /tmp/cmake.sh
+    /tmp/cmake.sh --skip-license --prefix=/tmp/cmake_bin
+    export PATH=/tmp/cmake_bin/bin:$PATH
+
     # Chỉ định CMake dùng Python3 của VENV
     cmake -B build \
           -DFAISS_ENABLE_GPU=OFF \
