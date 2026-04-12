@@ -109,7 +109,7 @@ class Settings(BaseSettings):
         return v
 
     sensor_sdk_path: str = Field(
-        default="/home/yen/SDK-Fingerprint-sensor",
+        default="/home/binhan1/SDK-Fingerprint-sensor",
         description="Path to sensor SDK",
     )
     mock_mode: bool = Field(

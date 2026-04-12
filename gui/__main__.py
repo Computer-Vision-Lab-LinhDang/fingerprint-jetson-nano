@@ -45,6 +45,10 @@ def main() -> None:
     window = MainWindow(api_base_url=api_url)
     window.show()
 
+    # Enable Ctrl+C to kill the GUI
+    import signal
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
     sys.exit(app.exec_())
 
 
