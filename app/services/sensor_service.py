@@ -54,7 +54,7 @@ class SensorService:
             return True
 
         driver = USBSensorDriver(vid=vid, pid=pid, sdk_path=sdk_path)
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         connected = await loop.run_in_executor(None, driver.open)
 
         if connected:
@@ -72,7 +72,7 @@ class SensorService:
 
     async def shutdown(self) -> None:
         if self._driver is not None:
-            loop = asyncio.get_running_loop()
+            loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, self._driver.close)
             self._driver = None
             logger.info("SensorService: shut down")
@@ -92,13 +92,13 @@ class SensorService:
     async def capture_image(self) -> CaptureResult:
         if self._driver is None:
             return CaptureResult(success=False, error="Sensor not initialized")
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._driver.capture_image)
 
     async def check_finger(self) -> bool:
         if self._driver is None:
             return False
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._driver.check_finger)
 
     async def get_info(self) -> Optional[SensorInfo]:
@@ -109,19 +109,19 @@ class SensorService:
     async def led_on(self, color: int) -> bool:
         if self._driver is None:
             return False
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, partial(self._driver.led_on, color))
 
     async def led_off(self) -> bool:
         if self._driver is None:
             return False
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._driver.led_off)
 
     async def beep(self, duration_ms: int = 100) -> bool:
         if self._driver is None:
             return False
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, partial(self._driver.beep, duration_ms)
         )
@@ -131,7 +131,7 @@ class SensorService:
     async def add_user(self, user_id: Optional[int] = None) -> Tuple[bool, int]:
         if not isinstance(self._driver, USBSensorDriver):
             return False, 0
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, partial(self._driver.add_user, user_id)
         )
@@ -141,7 +141,7 @@ class SensorService:
     ) -> Tuple[bool, int]:
         if not isinstance(self._driver, USBSensorDriver):
             return False, 0
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, partial(self._driver.match_fingerprint, timeout_sec)
         )
@@ -149,7 +149,7 @@ class SensorService:
     async def delete_user(self, user_id: int) -> bool:
         if not isinstance(self._driver, USBSensorDriver):
             return False
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, partial(self._driver.delete_user, user_id)
         )
@@ -157,19 +157,19 @@ class SensorService:
     async def delete_all(self) -> bool:
         if not isinstance(self._driver, USBSensorDriver):
             return False
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._driver.delete_all)
 
     async def get_user_count(self) -> int:
         if not isinstance(self._driver, USBSensorDriver):
             return -1
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._driver.get_user_count)
 
     async def get_compare_level(self) -> int:
         if not isinstance(self._driver, USBSensorDriver):
             return -1
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._driver.get_compare_level)
 
 

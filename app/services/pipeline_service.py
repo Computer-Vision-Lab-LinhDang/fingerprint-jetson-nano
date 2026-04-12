@@ -253,14 +253,14 @@ class PipelineService:
             department=user_data.get("department", ""),
             role=user_data.get("role", "user"),
         )
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         created = await loop.run_in_executor(None, self._user_repo.create, user)
         return created.to_dict()
 
     async def get_user(self, user_id: int) -> Optional[Dict[str, Any]]:
         if self._user_repo is None:
             return None
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         user = await loop.run_in_executor(None, self._user_repo.get_by_id, user_id)
         return user.to_dict() if user else None
 
@@ -275,7 +275,7 @@ class PipelineService:
         if self._user_repo is None:
             return [], 0
 
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
 
         if search:
             all_users = await loop.run_in_executor(
@@ -314,7 +314,7 @@ class PipelineService:
     ) -> Optional[Dict[str, Any]]:
         if self._user_repo is None:
             return None
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         user = await loop.run_in_executor(None, self._user_repo.get_by_id, user_id)
         if user is None:
             return None
@@ -325,7 +325,7 @@ class PipelineService:
     async def deactivate_user(self, user_id: int) -> bool:
         if self._user_repo is None:
             return False
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, self._user_repo.deactivate, user_id)
         # Also deactivate fingerprints and rebuild FAISS
         if self._fp_repo is not None:
@@ -354,7 +354,7 @@ class PipelineService:
             # Validate user exists
             user = None
             if self._user_repo is not None:
-                loop = asyncio.get_running_loop()
+                loop = asyncio.get_event_loop()
                 user_obj = await loop.run_in_executor(
                     None, self._user_repo.get_by_id, user_id
                 )
@@ -428,7 +428,7 @@ class PipelineService:
             )
 
             if self._fp_repo is not None:
-                loop = asyncio.get_running_loop()
+                loop = asyncio.get_event_loop()
                 saved_fp = await loop.run_in_executor(None, self._fp_repo.create, fp_record)
                 fp_id = saved_fp.id
 
@@ -530,7 +530,7 @@ class PipelineService:
                 user_id=user_id, latency_ms=round(elapsed, 2),
             )
 
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         fps = await loop.run_in_executor(
             None, self._fp_repo.get_by_user_id, user_id, True
         )
@@ -660,7 +660,7 @@ class PipelineService:
         # Map fp_id → user info from DB
         results: List[IdentifyResult] = []
         if self._fp_repo is not None and self._user_repo is not None:
-            loop = asyncio.get_running_loop()
+            loop = asyncio.get_event_loop()
             for fp_id, score in matches:
                 fp = await loop.run_in_executor(None, self._fp_repo.get_by_id, fp_id)
                 if fp is None:
@@ -681,7 +681,7 @@ class PipelineService:
         if self._log_repo is not None:
             best = results[0] if results else None
             decision = VerificationDecision.ACCEPT if best else VerificationDecision.REJECT
-            loop = asyncio.get_running_loop()
+            loop = asyncio.get_event_loop()
             log = VerificationLog(
                 matched_user_id=best.user_id if best else None,
                 mode=VerificationMode.IDENTIFY.value,
@@ -706,13 +706,13 @@ class PipelineService:
         fp_count = 0
         log_count = 0
         if self._user_repo is not None:
-            loop = asyncio.get_running_loop()
+            loop = asyncio.get_event_loop()
             user_count = await loop.run_in_executor(None, self._user_repo.count, True)
         if self._fp_repo is not None:
-            loop = asyncio.get_running_loop()
+            loop = asyncio.get_event_loop()
             fp_count = await loop.run_in_executor(None, self._fp_repo.count, True)
         if self._log_repo is not None:
-            loop = asyncio.get_running_loop()
+            loop = asyncio.get_event_loop()
             log_count = await loop.run_in_executor(None, self._log_repo.count)
 
         pipeline_profiling = {}
@@ -744,7 +744,7 @@ class PipelineService:
         if self._log_repo is None:
             return [], 0
 
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         if user_id is not None:
             logs = await loop.run_in_executor(
                 None, self._log_repo.get_by_user, user_id, limit * page
@@ -1063,7 +1063,7 @@ class PipelineService:
             logger.warning("Sync payload missing embedding or employee_id, skipping.")
             return False
 
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
 
         try:
             # --- Upsert user ---
