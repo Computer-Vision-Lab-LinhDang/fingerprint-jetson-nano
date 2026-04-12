@@ -5,7 +5,6 @@ Ported from jetson-fingerverify-app/mdgt_edge/database/repository.py.
 Provides UserRepository, FingerprintRepository, and VerificationLogRepository.
 """
 
-from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone

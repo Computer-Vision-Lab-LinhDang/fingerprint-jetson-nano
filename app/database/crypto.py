@@ -5,7 +5,6 @@ Ported from jetson-fingerverify-app/mdgt_edge/database/crypto.py.
 Encrypts/decrypts embedding vectors and minutiae data at rest.
 """
 
-from __future__ import annotations
 
 import base64
 import json

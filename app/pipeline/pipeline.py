@@ -1,6 +1,5 @@
 """End-to-end verification / identification pipeline orchestrating all stages."""
 
-from __future__ import annotations
 
 import asyncio
 import functools

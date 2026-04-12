@@ -1,6 +1,5 @@
 """Fingerprint image preprocessing: enhancement, segmentation, and normalization."""
 
-from __future__ import annotations
 
 import logging
 import math

@@ -1,6 +1,5 @@
 """Verification and identification endpoints + WebSocket for real-time streaming."""
 
-from __future__ import annotations
 
 import asyncio
 import base64

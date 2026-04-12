@@ -4,7 +4,6 @@ Manages application lifecycle (startup -> running -> shutdown).
 Separated from main.py for readability and easier testing.
 """
 
-from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager

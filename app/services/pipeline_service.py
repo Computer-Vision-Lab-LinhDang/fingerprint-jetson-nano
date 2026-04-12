@@ -5,7 +5,6 @@ Provides async methods for enrollment, 1:1 verification, and 1:N identification
 using the actual AI pipeline (preprocessing → minutiae → graph → inference → FAISS).
 """
 
-from __future__ import annotations
 
 import asyncio
 import json

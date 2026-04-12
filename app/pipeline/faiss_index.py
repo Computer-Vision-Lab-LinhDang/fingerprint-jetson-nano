@@ -5,7 +5,6 @@ IVFFlat for larger ones.  Gracefully degrades when ``faiss`` is not
 installed by falling back to a pure-numpy brute-force search.
 """
 
-from __future__ import annotations
 
 import logging
 import math

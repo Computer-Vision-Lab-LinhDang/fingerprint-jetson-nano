@@ -6,7 +6,6 @@ can call sensor operations without blocking the event loop.
 Fallbacks to MockSensorDriver if hardware is not detected.
 """
 
-from __future__ import annotations
 
 import asyncio
 import logging

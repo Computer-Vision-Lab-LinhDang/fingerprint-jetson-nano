@@ -5,7 +5,6 @@ Ported from fingerprint_worker/app/mqtt/client.py with extensions for
 register/verify task topics.
 """
 
-from __future__ import annotations
 
 import json
 import logging

@@ -5,7 +5,6 @@ Bridges MQTT task dispatch to existing PipelineService and SensorService.
 Results are published back to orchestrator via MQTT.
 """
 
-from __future__ import annotations
 
 import asyncio
 import base64

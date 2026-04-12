@@ -1,6 +1,5 @@
 """Model management endpoints: list, upload, activate, convert, profile, delete."""
 
-from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone

@@ -1,6 +1,5 @@
 """Minutiae extraction: abstract base, FingerNet ONNX backend, and crossing-number fallback."""
 
-from __future__ import annotations
 
 import logging
 import math

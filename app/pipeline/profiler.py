@@ -1,6 +1,5 @@
 """Thread-safe pipeline profiler for stage-by-stage timing collection."""
 
-from __future__ import annotations
 
 import json
 import threading

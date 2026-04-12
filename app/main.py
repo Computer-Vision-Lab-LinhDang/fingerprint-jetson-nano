@@ -6,7 +6,6 @@ Creates FastAPI app and registers all routers.
 Contains only application factory logic — no business logic here.
 """
 
-from __future__ import annotations
 
 import logging
 import logging.config

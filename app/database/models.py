@@ -5,7 +5,6 @@ Ported from jetson-fingerverify-app/mdgt_edge/database/models.py.
 Simplified for the worker's local storage needs.
 """
 
-from __future__ import annotations
 
 import hashlib
 import struct

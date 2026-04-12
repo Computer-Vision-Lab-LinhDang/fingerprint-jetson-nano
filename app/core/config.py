@@ -10,7 +10,6 @@ All configurations are loaded from:
 See .env.example for all configurable variables.
 """
 
-from __future__ import annotations
 
 from functools import lru_cache
 

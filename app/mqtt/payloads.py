@@ -1,6 +1,5 @@
 """MQTT payload dataclasses for worker ↔ orchestrator communication."""
 
-from __future__ import annotations
 
 from enum import Enum
 from typing import Any, Dict, List, Optional

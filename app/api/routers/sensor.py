@@ -1,6 +1,5 @@
 """Sensor endpoints: status, single capture, LED control, live stream via WebSocket."""
 
-from __future__ import annotations
 
 import asyncio
 import base64

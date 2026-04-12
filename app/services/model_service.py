@@ -2,7 +2,6 @@
 Service managing model inference: scan, upload, delete, convert, profile.
 """
 
-from __future__ import annotations
 
 import asyncio
 import hashlib

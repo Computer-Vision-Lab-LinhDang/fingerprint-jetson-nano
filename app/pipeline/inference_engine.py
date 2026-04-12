@@ -4,7 +4,6 @@ Supports ONNX Runtime and TensorRT with graceful fallback when either
 dependency is unavailable.
 """
 
-from __future__ import annotations
 
 import logging
 import time

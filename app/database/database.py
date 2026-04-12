@@ -5,7 +5,6 @@ Ported from jetson-fingerverify-app/mdgt_edge/database/database.py.
 Provides DDL, thread-local connections, transaction management.
 """
 
-from __future__ import annotations
 
 import logging
 import sqlite3

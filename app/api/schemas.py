@@ -2,7 +2,6 @@
 Pydantic v2 schemas for all API request/response models.
 """
 
-from __future__ import annotations
 
 import uuid
 from datetime import datetime

@@ -1,6 +1,5 @@
 """System endpoints: health, logs, stats, config, backup, devices."""
 
-from __future__ import annotations
 
 import math
 from datetime import datetime, timezone

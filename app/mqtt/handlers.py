@@ -9,7 +9,6 @@ Handles:
 - task/{worker_id}/message → log message from orchestrator
 """
 
-from __future__ import annotations
 
 import json
 import logging

@@ -2,7 +2,6 @@
 System service: health metrics, database backup, configuration management.
 """
 
-from __future__ import annotations
 
 import asyncio
 import logging

@@ -1,7 +1,6 @@
 from typing import List, Optional
 """Dynamic k-NN graph construction for MDGTv2 minutiae sets."""
 
-from __future__ import annotations
 
 import logging
 import math
