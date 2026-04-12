@@ -11,6 +11,24 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def _isqrt(value: int) -> int:
+    """Python 3.6-compatible integer square root."""
+    if hasattr(math, "isqrt"):
+        return math.isqrt(value)
+
+    if value < 0:
+        raise ValueError("isqrt() argument must be nonnegative")
+    if value < 2:
+        return value
+
+    guess = int(value ** 0.5)
+    while (guess + 1) * (guess + 1) <= value:
+        guess += 1
+    while guess * guess > value:
+        guess -= 1
+    return guess
+
+
 class FingerprintPreprocessor:
     """Full preprocessing pipeline for raw fingerprint images.
 
@@ -185,7 +203,7 @@ class FingerprintPreprocessor:
         if image is None:
             # Attempt to interpret as raw grayscale
             total = len(raw_image)
-            side = int(math.isqrt(total))
+            side = _isqrt(total)
             if side * side == total:
                 image = arr.reshape((side, side))
             else:
