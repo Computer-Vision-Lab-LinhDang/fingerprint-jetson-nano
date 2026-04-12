@@ -22,15 +22,14 @@ from pydantic.generics import GenericModel
 # Generic API response wrapper
 # ---------------------------------------------------------------------------
 
-DataT = TypeVar("DataT")
 RoleLiteral = Literal["user", "admin", "superadmin"]
 
 
-class ApiResponse(GenericModel, Generic[DataT]):
+class ApiResponse(BaseModel):
     """Standard envelope returned by every endpoint."""
 
     success: bool = True
-    data: Optional[DataT] = None
+    data: Any = None
     error: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
