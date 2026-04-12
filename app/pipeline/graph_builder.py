@@ -14,6 +14,22 @@ from app.pipeline.minutiae_extractor import Minutia, MinutiaeType
 logger = logging.getLogger(__name__)
 
 
+def _take_along_axis(arr: np.ndarray, indices: np.ndarray, axis: int) -> np.ndarray:
+    """NumPy 1.13-compatible take_along_axis replacement."""
+    if hasattr(np, "take_along_axis"):
+        return np.take_along_axis(arr, indices, axis=axis)
+
+    if axis < 0:
+        axis += arr.ndim
+    if axis != 1 or arr.ndim != 2 or indices.ndim != 2:
+        raise NotImplementedError(
+            "Fallback take_along_axis only supports 2D arrays along axis=1"
+        )
+
+    row_idx = np.arange(arr.shape[0])[:, np.newaxis]
+    return arr[row_idx, indices]
+
+
 # ------------------------------------------------------------------
 # Data container
 # ------------------------------------------------------------------
@@ -173,7 +189,7 @@ class DynamicGraphBuilder:
         row_idx = np.arange(n)[:, np.newaxis]
         selected_dists = sq_dist[row_idx, indices]
         sort_order = np.argsort(selected_dists, axis=1)
-        indices = np.take_along_axis(indices, sort_order, axis=1)
+        indices = _take_along_axis(indices, sort_order, axis=1)
 
         return indices.astype(np.int32)
 
