@@ -220,26 +220,58 @@ def _handle_model_update(mqtt_client_ref: Any, payload: ModelUpdatePayload) -> N
 
         # Auto-convert ONNX → TensorRT if applicable
         if payload.model_name.endswith(".onnx"):
+            import shutil
+            import subprocess
             model_dir = model_service.model_dir
             onnx_path = os.path.join(model_dir, payload.model_type, payload.model_name)
-            trt_path = onnx_path.replace(".onnx", ".trt")
+            engine_path = onnx_path.replace(".onnx", "_fp16.engine")
 
-            if not os.path.exists(trt_path):
-                try:
-                    _publish_model_status(
-                        mqtt_client_ref, worker_id, payload, "converting",
+            if not os.path.exists(engine_path):
+                # Find trtexec binary
+                trtexec_candidates = [
+                    "/usr/src/tensorrt/bin/trtexec",
+                    "/usr/local/bin/trtexec",
+                    shutil.which("trtexec") or "",
+                ]
+                trtexec_bin = next(
+                    (p for p in trtexec_candidates if p and os.path.exists(p)), None
+                )
+
+                if trtexec_bin is None:
+                    logger.info(
+                        "trtexec not found — skipping TensorRT conversion, "
+                        "will use ONNX Runtime directly."
                     )
-                    logger.info("Auto-converting %s → TensorRT...", payload.model_name)
-                    from app.services.inference_service import convert_onnx_to_trt
-                    converted = convert_onnx_to_trt(onnx_path, trt_path)
-                    if converted:
-                        logger.info("✅ TensorRT conversion complete: %s", trt_path)
-                    else:
-                        logger.warning("⚠️ TensorRT conversion failed, will use ONNX Runtime")
-                except ImportError:
-                    logger.info("TensorRT converter not available, using ONNX Runtime")
-                except Exception as exc:
-                    logger.warning("⚠️ TensorRT conversion error: %s", exc)
+                else:
+                    try:
+                        _publish_model_status(
+                            mqtt_client_ref, worker_id, payload, "converting",
+                        )
+                        logger.info(
+                            "Auto-converting %s → TensorRT (fp16)...",
+                            payload.model_name,
+                        )
+                        cmd = [
+                            trtexec_bin,
+                            f"--onnx={onnx_path}",
+                            f"--saveEngine={engine_path}",
+                            "--fp16",
+                            "--maxBatch=1",
+                        ]
+                        result = subprocess.run(
+                            cmd, capture_output=True, text=True, timeout=600
+                        )
+                        if result.returncode == 0 and os.path.exists(engine_path):
+                            logger.info(
+                                "✅ TensorRT conversion complete: %s", engine_path
+                            )
+                        else:
+                            logger.warning(
+                                "⚠️ trtexec failed (code %d): %s",
+                                result.returncode, result.stderr[-1000:],
+                            )
+                    except Exception as exc:
+                        logger.warning("⚠️ TensorRT conversion error: %s", exc)
 
         # Publish: ready
         _publish_model_status(mqtt_client_ref, worker_id, payload, "ready")
