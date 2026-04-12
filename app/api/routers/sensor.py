@@ -7,10 +7,6 @@ import base64
 import json
 import logging
 import time
-try:
-    from typing import List, Optional, Annotated
-except ImportError:
-    
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from app.api.schemas import (
