@@ -15,6 +15,7 @@ except ImportError:
     from typing_extensions import Literal
 
 from pydantic import BaseModel, Field, validator
+from pydantic.generics import GenericModel
 
 
 # ---------------------------------------------------------------------------
@@ -25,7 +26,7 @@ DataT = TypeVar("DataT")
 RoleLiteral = Literal["user", "admin", "superadmin"]
 
 
-class ApiResponse(BaseModel, Generic[DataT]):
+class ApiResponse(GenericModel, Generic[DataT]):
     """Standard envelope returned by every endpoint."""
 
     success: bool = True
