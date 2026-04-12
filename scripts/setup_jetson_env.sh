@@ -192,9 +192,13 @@ install_pycuda_for_tensorrt() {
     tar -xzf pycuda-2021.1.tar.gz
     cd pycuda-2021.1
 
+    # pycuda's legacy setup.py dependency resolution tends to pull modern
+    # pytools/siphash24 packages that do not play nicely with Python 3.6.
+    pip install "pytools==2021.2.9"
+
     python3 configure.py --cuda-root="$CUDA_ROOT" --no-use-shipped-boost
     python3 setup.py build
-    python3 setup.py install
+    python3 -m pip install --no-deps --no-build-isolation .
 
     cd "$PROJECT_ROOT"
     trap - EXIT
