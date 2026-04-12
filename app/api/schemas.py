@@ -8,6 +8,12 @@ import uuid
 from datetime import datetime
 from enum import Enum
 
+from typing import Generic
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
+
 from pydantic import BaseModel, Field, validator
 
 
