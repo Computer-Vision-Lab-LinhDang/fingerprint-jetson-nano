@@ -125,14 +125,15 @@ class USBSensorDriver(SensorDriver):
                 self._reader = FingerprintReader()
                 result = self._reader.open()
                 self._connected = bool(result)
+                print(f"[DEBUG SENSOR] _reader.open() returned: {result}")
                 return self._connected
             except ImportError as e:
-                import logging
-                logging.getLogger(__name__).error(f"Failed to import SDK from {self._sdk_path}: {e}")
+                print(f"[DEBUG SENSOR] ImportError loading SDK from {self._sdk_path}: {e}")
                 return False
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).error(f"Sensor open() crashed! Hardware permission or USB error?: {e}")
+                print(f"[DEBUG SENSOR] Crash in open(): {e}")
+                import traceback
+                traceback.print_exc()
                 return False
 
     def close(self) -> None:
