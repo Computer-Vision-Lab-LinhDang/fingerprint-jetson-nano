@@ -6,7 +6,7 @@ Provides DDL, thread-local connections, transaction management.
 """
 
 
-from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Callable, Generator, Iterable, AsyncIterator
+from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Callable, Generator, Iterable, AsyncIterator, TypeVar, Type, Awaitable, Sequence, Mapping
 import logging
 import sqlite3
 import threading

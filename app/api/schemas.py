@@ -3,7 +3,7 @@ Pydantic v2 schemas for all API request/response models.
 """
 
 
-from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Callable, Generator, Iterable, AsyncIterator
+from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Callable, Generator, Iterable, AsyncIterator, TypeVar, Type, Awaitable, Sequence, Mapping
 import uuid
 from datetime import datetime
 from enum import Enum

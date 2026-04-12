@@ -6,7 +6,7 @@ Encrypts/decrypts embedding vectors and minutiae data at rest.
 """
 
 
-from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Callable, Generator, Iterable, AsyncIterator
+from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Callable, Generator, Iterable, AsyncIterator, TypeVar, Type, Awaitable, Sequence, Mapping
 import base64
 import json
 import logging

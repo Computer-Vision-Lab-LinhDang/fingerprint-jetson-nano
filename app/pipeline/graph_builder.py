@@ -1,7 +1,7 @@
 """Dynamic k-NN graph construction for MDGTv2 minutiae sets."""
 
 
-from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Callable, Generator, Iterable, AsyncIterator
+from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Callable, Generator, Iterable, AsyncIterator, TypeVar, Type, Awaitable, Sequence, Mapping
 import logging
 import math
 from dataclasses import dataclass

@@ -6,7 +6,7 @@ Simplified for the worker's local storage needs.
 """
 
 
-from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Callable, Generator, Iterable, AsyncIterator
+from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Callable, Generator, Iterable, AsyncIterator, TypeVar, Type, Awaitable, Sequence, Mapping
 import hashlib
 import struct
 from dataclasses import dataclass, field, replace

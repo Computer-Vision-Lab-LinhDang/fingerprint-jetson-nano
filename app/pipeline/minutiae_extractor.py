@@ -1,7 +1,7 @@
 """Minutiae extraction: abstract base, FingerNet ONNX backend, and crossing-number fallback."""
 
 
-from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Callable, Generator, Iterable, AsyncIterator
+from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Callable, Generator, Iterable, AsyncIterator, TypeVar, Type, Awaitable, Sequence, Mapping
 import logging
 import math
 from abc import ABC, abstractmethod
