@@ -1,28 +1,21 @@
-"""
-Centralized configuration for Fingerprint Jetson Nano Worker.
+"""Centralized configuration for the Jetson worker."""
 
-All configurations are loaded from:
-  1. .env file (highest priority)
-  2. Environment variables (overrides .env)
-  3. Default values defined in this class
+from __future__ import annotations
 
-See .env.example for all configurable variables.
-"""
-
-
-from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Callable, Generator, Iterable, AsyncIterator, TypeVar, Type, Awaitable, Sequence, Mapping
 from functools import lru_cache
+from pathlib import Path
+from typing import Any
 
-from pydantic import BaseSettings, Field, validator
+from pydantic import Field, validator
+
+try:
+    from pydantic_settings import BaseSettings
+except ImportError:  # pragma: no cover - pydantic v1 fallback
+    from pydantic import BaseSettings
 
 
 class Settings(BaseSettings):
-    """
-    Configuration for Jetson Nano Worker.
-
-    Environment prefix: WORKER_
-    Example: WORKER_DEBUG=true, WORKER_PORT=8000
-    """
+    """Configuration for Jetson Nano Worker."""
 
     # -------------------------------------------------------------------------
     # API Server
@@ -38,11 +31,15 @@ class Settings(BaseSettings):
     device_id: str = "JETSON-001"
 
     # -------------------------------------------------------------------------
-    # Directory Paths (relative to runtime dir)
+    # Directory Paths
     # -------------------------------------------------------------------------
-    model_dir: str = "models/"
-    data_dir: str = "data/"
-    backup_dir: str = "data/backups/"
+    worker_home: str = Field(
+        default_factory=lambda: str(Path.cwd()),
+        description="Base directory used to resolve relative worker paths.",
+    )
+    model_dir: str = "models"
+    data_dir: str = "data"
+    backup_dir: str = "data/backups"
 
     # -------------------------------------------------------------------------
     # Inference Backend
@@ -96,18 +93,6 @@ class Settings(BaseSettings):
     sensor_vid: int = Field(default=0x0483, description="USB Vendor ID of the sensor")
     sensor_pid: int = Field(default=0x5720, description="USB Product ID of the sensor")
 
-    @validator("sensor_vid", "sensor_pid", pre=True)
-    @classmethod
-    def _parse_hex_int(cls, v):
-        if isinstance(v, int):
-            return v
-        if isinstance(v, str):
-            v = v.strip()
-            if v.startswith(("0x", "0X")):
-                return int(v, 16)
-            return int(v)
-        return v
-
     sensor_sdk_path: str = Field(
         default="/home/binhan1/SDK-Fingerprint-sensor",
         description="Path to sensor SDK",
@@ -124,11 +109,13 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # CORS — allowed origins to access API
     # -------------------------------------------------------------------------
-    cors_origins: List[str] = [
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:8080",
-    ]
+    cors_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://localhost:8080",
+        ]
+    )
 
     # -------------------------------------------------------------------------
     # Database
@@ -156,17 +143,56 @@ class Settings(BaseSettings):
         description="Fernet key for encrypting embeddings. Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'",
     )
 
+    @validator("worker_home", pre=True)
+    @classmethod
+    def _normalize_worker_home(cls, value: Any) -> str:
+        if value in (None, ""):
+            return str(Path.cwd())
+        return str(Path(value).expanduser().resolve())
+
     class Config:
         env_prefix = "WORKER_"
         env_file = ".env"
         env_file_encoding = "utf-8"
         extra = "ignore"
+        protected_namespaces = ()
 
-    def as_pipeline_config(self) -> dict:
-        """
-        Returns config dict to initialize VerificationPipeline.
-        Separated so pipeline does not depend directly on Settings.
-        """
+    @validator("sensor_vid", "sensor_pid", pre=True)
+    @classmethod
+    def _parse_hex_int(cls, value: Any) -> Any:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            value = value.strip()
+            if value.startswith(("0x", "0X")):
+                return int(value, 16)
+            return int(value)
+        return value
+
+    @validator("model_dir", "data_dir", "backup_dir", "sample_dir", pre=True, always=True)
+    @classmethod
+    def _resolve_directory(cls, value: Any, values: dict[str, Any]) -> str:
+        return cls._resolve_path_value(value, values)
+
+    @validator("model_path", "fingernet_model_path", pre=True, always=True)
+    @classmethod
+    def _resolve_file_path(cls, value: Any, values: dict[str, Any]) -> str:
+        return cls._resolve_path_value(value, values)
+
+    @staticmethod
+    def _resolve_path_value(value: Any, values: dict[str, Any]) -> str:
+        if value in (None, ""):
+            return ""
+
+        raw_path = Path(str(value)).expanduser()
+        if raw_path.is_absolute():
+            return str(raw_path)
+
+        base_dir = Path(values.get("worker_home", Path.cwd()))
+        return str((base_dir / raw_path).resolve())
+
+    def as_pipeline_config(self) -> dict[str, Any]:
+        """Return the config dict expected by ``VerificationPipeline``."""
         return {
             "backend": self.backend,
             "model_path": self.model_path,
@@ -184,8 +210,5 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """
-    Returns Settings instance (singleton - created only once).
-    Uses lru_cache to ensure the same object is reused throughout the app.
-    """
+    """Return the cached settings instance."""
     return Settings()

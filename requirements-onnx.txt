@@ -1,5 +1,2 @@
-# Optional ONNX fallback dependencies.
-# Use this only in a dedicated ONNX/dev environment, not in the default
-# Jetson TensorRT setup that reuses system NumPy/OpenCV packages.
-
-onnxruntime>=1.8.0,<2.0
+# Add ONNX runtime support on top of the base worker installation.
+.[onnx]

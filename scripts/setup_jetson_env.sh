@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Jetson Nano worker environment setup for Python 3.6 + TensorRT
+# Jetson Nano worker environment setup for Python 3.10 + TensorRT
 # ============================================================================
 
 set -euo pipefail
@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 VENV_DIR="$PROJECT_ROOT/venv"
 SKIP_APT="${SKIP_APT:-0}"
+PYTHON_BIN="${WORKER_PYTHON_BIN:-python3.10}"
 
 
 log_step() {
@@ -97,19 +98,21 @@ install_system_deps() {
 create_project_env() {
     log_step "2. Creating project venv with system packages"
 
+    if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+        echo "ERROR: $PYTHON_BIN not found. Set WORKER_PYTHON_BIN to a Python 3.10+ binary."
+        exit 1
+    fi
+
     if [ -d "$VENV_DIR" ]; then
         echo "Removing old venv at $VENV_DIR"
         rm -rf "$VENV_DIR"
     fi
 
-    python3 -m venv --system-site-packages "$VENV_DIR"
+    "$PYTHON_BIN" -m venv --system-site-packages "$VENV_DIR"
     # shellcheck disable=SC1090
     source "$VENV_DIR/bin/activate"
 
-    python3 -m pip install --upgrade \
-        "pip<22" \
-        "setuptools<60" \
-        "wheel<0.38"
+    python -m pip install --upgrade pip setuptools wheel
 }
 
 
@@ -128,22 +131,19 @@ prepare_project_files() {
 
 
 install_python_deps() {
-    log_step "4. Installing Python dependencies"
+    log_step "4. Installing packaged worker dependencies"
 
     # shellcheck disable=SC1090
     source "$VENV_DIR/bin/activate"
 
-    # Fresh venvs created with --system-site-packages should keep using the
-    # distro cryptography package on Python 3.6. Remove any stale pip copy that
-    # may have been injected by previous experiments before installing the app.
-    python3 -m pip uninstall -y cryptography onnxruntime onnxruntime-gpu >/dev/null 2>&1 || true
-    pip install -r "$PROJECT_ROOT/requirements.txt"
+    python -m pip uninstall -y cryptography onnxruntime onnxruntime-gpu >/dev/null 2>&1 || true
+    python -m pip install --no-build-isolation "$PROJECT_ROOT[gui]"
 
     local backend
     backend="$(read_backend)"
     if [ "$backend" = "onnx" ]; then
         echo "WORKER_BACKEND=onnx detected -> installing optional ONNX deps"
-        pip install -r "$PROJECT_ROOT/requirements-onnx.txt"
+        python -m pip install --no-build-isolation "$PROJECT_ROOT[onnx]"
     else
         echo "WORKER_BACKEND=$backend -> skipping pip onnxruntime in default TensorRT setup"
     fi
@@ -198,7 +198,7 @@ install_pycuda_for_tensorrt() {
     cd pycuda-2021.1
 
     # pycuda's legacy setup.py dependency resolution tends to pull modern
-    # pytools/siphash24 packages that do not play nicely with Python 3.6.
+    # pytools/siphash24 packages that are unstable on Jetson builds.
     pip install "pytools==2021.2.9"
 
     python3 configure.py --cuda-root="$CUDA_ROOT" --no-use-shipped-boost
@@ -372,8 +372,8 @@ main() {
     echo "Setup complete"
     echo "================================================================="
     echo "Activate with: source $VENV_DIR/bin/activate"
-    echo "Run backend:   python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
-    echo "Run GUI:       python3 -m gui"
+    echo "Run backend:   fingerprint-worker-api"
+    echo "Run GUI:       fingerprint-worker-gui"
 }
 
 

@@ -1,30 +1,21 @@
-"""Sensor endpoints: status, single capture, LED control, live stream via WebSocket."""
+"""Sensor endpoints and real-time fingerprint preview streaming."""
 
+from __future__ import annotations
 
-from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Callable, Generator, Iterable, AsyncIterator, TypeVar, Type, Awaitable, Sequence, Mapping
 import asyncio
 import base64
 import json
 import logging
 import time
+
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
-from app.api.schemas import (
-    ApiResponse,
-    CaptureResponse,
-    LEDRequest,
-    SensorStatus,
-)
+from app.api.schemas import ApiResponse, CaptureResponse, LEDRequest, SensorStatus
 from app.services.sensor_service import SensorService, get_sensor_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sensor", tags=["sensor"])
-
-
-# ---------------------------------------------------------------------------
-# GET /sensor/status
-# ---------------------------------------------------------------------------
 
 
 @router.get("/status", response_model=ApiResponse)
@@ -49,11 +40,6 @@ async def sensor_status(
     return ApiResponse(success=True, data=data)
 
 
-# ---------------------------------------------------------------------------
-# POST /sensor/capture — single image capture
-# ---------------------------------------------------------------------------
-
-
 @router.post("/capture", response_model=ApiResponse)
 async def capture(
     sensor: SensorService = Depends(get_sensor_service),
@@ -74,12 +60,11 @@ async def capture(
             error=result.error,
         )
 
-    b64 = base64.b64encode(result.image_data).decode("ascii")
     return ApiResponse(
         success=True,
         data=CaptureResponse(
             success=True,
-            image_base64=b64,
+            image_base64=base64.b64encode(result.image_data).decode("ascii"),
             width=result.width,
             height=result.height,
             quality_score=result.quality_score,
@@ -89,25 +74,19 @@ async def capture(
     )
 
 
-# ---------------------------------------------------------------------------
-# POST /sensor/led — control LED
-# ---------------------------------------------------------------------------
-
-
 @router.post("/led", response_model=ApiResponse)
 async def led_control(
     body: LEDRequest,
     sensor: SensorService = Depends(get_sensor_service),
 ) -> ApiResponse:
-    if body.color == "off" or body.color == "0":
+    if body.color in {"off", "0"}:
         ok = await sensor.led_off()
     else:
         color_map = {"red": 1, "green": 2, "blue": 4, "white": 7}
-        color_int = color_map.get(body.color, 0)
         try:
             color_int = int(body.color)
         except ValueError:
-            pass
+            color_int = color_map.get(body.color, 0)
         ok = await sensor.led_on(color_int)
 
     return ApiResponse(
@@ -116,75 +95,54 @@ async def led_control(
     )
 
 
-# ---------------------------------------------------------------------------
-# WebSocket /sensor/stream — live fingerprint image stream
-# ---------------------------------------------------------------------------
-
-
 @router.websocket("/stream")
 async def ws_sensor_stream(websocket: WebSocket) -> None:
-    """
-    Stream fingerprint images in real time over WebSocket.
-
-    Client sends JSON:
-        {"action": "start", "fps": 10}
-        {"action": "stop"}
-
-    Server sends JSON frames:
-        {"type": "frame", "image_base64": "...", "width": 192, "height": 192,
-         "quality_score": 35.2, "has_finger": true, "timestamp": ...}
-    """
+    """Stream live fingerprint frames over WebSocket."""
     await websocket.accept()
     logger.info("WebSocket /sensor/stream connected")
 
     sensor = SensorService.get_instance()
     streaming = False
     target_fps = 10
+    stream_task: asyncio.Task[None] | None = None
 
     async def _stream_loop() -> None:
         nonlocal streaming
         while streaming:
             result = await sensor.capture_image()
             if result.success:
-                b64 = base64.b64encode(result.image_data).decode("ascii")
-                try:
-                    await websocket.send_json(
-                        {
-                            "type": "frame",
-                            "image_base64": b64,
-                            "width": result.width,
-                            "height": result.height,
-                            "quality_score": result.quality_score,
-                            "has_finger": result.has_finger,
-                            "timestamp": time.time(),
-                        }
-                    )
-                except Exception:
-                    streaming = False
-                    break
+                await websocket.send_json(
+                    {
+                        "type": "frame",
+                        "image_base64": base64.b64encode(result.image_data).decode("ascii"),
+                        "width": result.width,
+                        "height": result.height,
+                        "quality_score": result.quality_score,
+                        "has_finger": result.has_finger,
+                        "timestamp": time.time(),
+                    }
+                )
             await asyncio.sleep(1.0 / target_fps)
-
-    stream_task: asyncio.Optional[Task] = None
 
     try:
         while True:
-            raw_msg = await websocket.receive_text()
+            raw_message = await websocket.receive_text()
             try:
-                msg = json.loads(raw_msg)
+                message = json.loads(raw_message)
             except json.JSONDecodeError:
                 await websocket.send_json({"error": "Invalid JSON"})
                 continue
 
-            action = msg.get("action", "")
-
+            action = str(message.get("action", "")).lower()
             if action == "start":
-                target_fps = min(max(msg.get("fps", 10), 1), 30)
+                target_fps = max(1, min(int(message.get("fps", 10)), 30))
                 streaming = True
                 if stream_task is None or stream_task.done():
-                    stream_task = asyncio.ensure_future(_stream_loop())
+                    stream_task = asyncio.create_task(_stream_loop())
                 await websocket.send_json({"status": "streaming", "fps": target_fps})
+                continue
 
-            elif action == "stop":
+            if action == "stop":
                 streaming = False
                 if stream_task and not stream_task.done():
                     stream_task.cancel()
@@ -192,25 +150,24 @@ async def ws_sensor_stream(websocket: WebSocket) -> None:
                         await stream_task
                     except asyncio.CancelledError:
                         pass
-                    stream_task = None
-                try:
-                    await websocket.send_json({"status": "stopped"})
-                except Exception:
-                    pass  # Client already disconnected
+                stream_task = None
+                await websocket.send_json({"status": "stopped"})
+                continue
 
-            else:
-                await websocket.send_json({"error": f"Unknown action: {action}"})
-
+            await websocket.send_json({"error": f"Unknown action: {action}"})
     except WebSocketDisconnect:
-        streaming = False
         logger.info("WebSocket /sensor/stream disconnected")
     except Exception as exc:
-        streaming = False
         logger.exception("WebSocket /sensor/stream error: %s", exc)
         try:
             await websocket.close(code=1011, reason=str(exc))
         except Exception:
             pass
     finally:
+        streaming = False
         if stream_task and not stream_task.done():
             stream_task.cancel()
+            try:
+                await stream_task
+            except asyncio.CancelledError:
+                pass

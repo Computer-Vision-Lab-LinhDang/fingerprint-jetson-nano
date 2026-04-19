@@ -13,7 +13,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 TARGET_USER="${SUDO_USER:-$USER}"
 
 echo "============================================="
-echo "  Fingerprint Jetson Nano Worker Setup"
+echo "  Fingerprint Jetson Nano Worker Setup (Python 3.10)"
 echo "============================================="
 echo "Project root: $PROJECT_ROOT"
 echo "Target user : $TARGET_USER"

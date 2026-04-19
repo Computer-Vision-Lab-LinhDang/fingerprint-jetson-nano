@@ -1,7 +1,8 @@
 """
 API request/response schemas.
 
-The Jetson worker stays on FastAPI/Pydantic v1 for Python 3.6 compatibility.
+These schemas remain Pydantic v1-compatible while the worker runtime targets
+Python 3.10+.
 """
 
 

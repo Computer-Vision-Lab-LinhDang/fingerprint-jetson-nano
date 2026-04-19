@@ -631,7 +631,7 @@ def run_cli():
         print("  {green}✓ Backend is running!{reset}".format(green=C.GREEN, reset=C.RESET))
     else:
         print("  {red}✗ Backend not reachable at {url}{reset}".format(red=C.RED, url=BASE_URL, reset=C.RESET))
-        print("  {dim}  Start with: uvicorn app.main:app --host 0.0.0.0 --port 8000{reset}".format(dim=C.DIM, reset=C.RESET))
+        print("  {dim}  Start with: fingerprint-worker-api{reset}".format(dim=C.DIM, reset=C.RESET))
 
     # Auto-connect MQTT
     if HAS_MQTT:
