@@ -18,6 +18,8 @@ python -m pip install --no-build-isolation .[gui]
 Optional extras:
 
 ```bash
+python -m pip install --no-build-isolation .[ai]
+python -m pip install --no-build-isolation .[jetson]
 python -m pip install --no-build-isolation .[onnx]
 python -m pip install --no-build-isolation .[faiss]
 python -m pip install --no-build-isolation .[dev]
