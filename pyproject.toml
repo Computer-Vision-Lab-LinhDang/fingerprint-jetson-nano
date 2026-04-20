@@ -66,5 +66,4 @@ fingerprint-worker-cli = "cli:run_cli"
 fingerprint-worker-gui = "gui.__main__:main"
 
 [tool.uv]
-prompt = "venv"
 default-groups = []
