@@ -5,20 +5,19 @@ These schemas remain Pydantic v1-compatible while the worker runtime targets
 Python 3.10+.
 """
 
+from __future__ import annotations
 
-from typing import List, Dict, Tuple, Set, Optional, Any, Union, Coroutine, Callable, Generator, Iterable, AsyncIterator, TypeVar, Type, Awaitable, Sequence, Mapping
 import uuid
 from datetime import datetime
 from enum import Enum
+from typing import Any, Optional
 
-from typing import Generic
 try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal
 
-from pydantic import BaseModel, Field, validator
-from pydantic.generics import GenericModel
+from pydantic import BaseModel, ConfigDict, Field, validator
 
 
 # ---------------------------------------------------------------------------
@@ -28,16 +27,17 @@ from pydantic.generics import GenericModel
 RoleLiteral = Literal["user", "admin", "superadmin"]
 
 
-class ApiResponse(BaseModel):
+class SchemaModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ApiResponse(SchemaModel):
     """Standard envelope returned by every endpoint."""
 
     success: bool = True
     data: Any = None
-    error: Optional[str] = None
+    error: str | None = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-
-    class Config:
-        orm_mode = True
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ class ApiResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class PaginationMeta(BaseModel):
+class PaginationMeta(SchemaModel):
     total: int
     page: int
     limit: int
@@ -70,7 +70,7 @@ class FingerEnum(str, Enum):
     LEFT_LITTLE = "left_little"
 
 
-class UserCreate(BaseModel):
+class UserCreate(SchemaModel):
     employee_id: str = Field(..., min_length=1, max_length=50)
     full_name: str = Field(..., min_length=1, max_length=200)
     department: str = Field(default="", max_length=100)
@@ -84,10 +84,10 @@ class UserCreate(BaseModel):
         return value
 
 
-class UserUpdate(BaseModel):
-    full_name: Optional[str] = None
-    department: Optional[str] = None
-    role: Optional[RoleLiteral] = None
+class UserUpdate(SchemaModel):
+    full_name: str | None = None
+    department: str | None = None
+    role: RoleLiteral | None = None
 
     @validator("role", pre=True)
     @classmethod
@@ -97,13 +97,13 @@ class UserUpdate(BaseModel):
         return value
 
 
-class EnrolledFinger(BaseModel):
+class EnrolledFinger(SchemaModel):
     finger: FingerEnum
     enrolled_at: datetime
     quality_score: float
 
 
-class UserResponse(BaseModel):
+class UserResponse(SchemaModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     employee_id: str
     full_name: str
@@ -111,16 +111,13 @@ class UserResponse(BaseModel):
     role: str
     is_active: bool = True
     fingerprint_count: int = 0
-    enrolled_fingers: List[EnrolledFinger] = []
+    enrolled_fingers: list[EnrolledFinger] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    class Config:
-        orm_mode = True
 
-
-class UserListResponse(BaseModel):
-    users: List[UserResponse]
+class UserListResponse(SchemaModel):
+    users: list[UserResponse]
     pagination: PaginationMeta
 
 
@@ -129,20 +126,20 @@ class UserListResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class FingerprintResponse(BaseModel):
+class FingerprintResponse(SchemaModel):
     finger: FingerEnum
-    image_base64: Optional[str] = None
+    image_base64: str | None = None
     quality_score: float = 0.0
     width: int = 0
     height: int = 0
 
 
-class EnrollRequest(BaseModel):
+class EnrollRequest(SchemaModel):
     finger: FingerEnum = FingerEnum.RIGHT_INDEX
     num_samples: int = Field(default=3, ge=1, le=10)
 
 
-class EnrollResponse(BaseModel):
+class EnrollResponse(SchemaModel):
     user_id: str
     finger: FingerEnum
     quality_score: float
@@ -155,12 +152,12 @@ class EnrollResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class VerifyRequest(BaseModel):
+class VerifyRequest(SchemaModel):
     user_id: str
-    image_base64: Optional[str] = None
+    image_base64: str | None = None
 
 
-class VerifyResponse(BaseModel):
+class VerifyResponse(SchemaModel):
     matched: bool
     score: float
     threshold: float
@@ -168,21 +165,21 @@ class VerifyResponse(BaseModel):
     latency_ms: float
 
 
-class IdentifyRequest(BaseModel):
+class IdentifyRequest(SchemaModel):
     top_k: int = Field(default=5, ge=1, le=50)
-    image_base64: Optional[str] = None
+    image_base64: str | None = None
 
 
-class IdentifyCandidate(BaseModel):
+class IdentifyCandidate(SchemaModel):
     user_id: str
     employee_id: str
     full_name: str
     score: float
 
 
-class IdentifyResponse(BaseModel):
+class IdentifyResponse(SchemaModel):
     identified: bool
-    candidates: List[IdentifyCandidate]
+    candidates: list[IdentifyCandidate]
     threshold: float
     latency_ms: float
 
@@ -192,7 +189,7 @@ class IdentifyResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class ModelInfo(BaseModel):
+class ModelInfo(SchemaModel):
     id: str
     filename: str
     format: str  # "onnx", "trt", "pt"
@@ -201,23 +198,23 @@ class ModelInfo(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
-class ModelListResponse(BaseModel):
-    models: List[ModelInfo]
+class ModelListResponse(SchemaModel):
+    models: list[ModelInfo]
 
 
-class ModelUploadResponse(BaseModel):
+class ModelUploadResponse(SchemaModel):
     id: str
     filename: str
     size_mb: float
     message: str = "Model uploaded successfully"
 
 
-class ConvertRequest(BaseModel):
+class ConvertRequest(SchemaModel):
     precision: str = Field(default="fp16", pattern="^(fp16|fp32|int8)$")
     max_batch_size: int = Field(default=1, ge=1, le=32)
 
 
-class ProfileResponse(BaseModel):
+class ProfileResponse(SchemaModel):
     model_id: str
     avg_latency_ms: float
     min_latency_ms: float
@@ -232,24 +229,24 @@ class ProfileResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class LogEntry(BaseModel):
+class LogEntry(SchemaModel):
     id: str
     timestamp: datetime
-    user_id: Optional[str] = None
-    employee_id: Optional[str] = None
+    user_id: str | None = None
+    employee_id: str | None = None
     action: str  # "verify", "identify", "enroll"
     decision: str  # "accept", "reject", "error"
-    score: Optional[float] = None
-    latency_ms: Optional[float] = None
-    details: Optional[str] = None
+    score: float | None = None
+    latency_ms: float | None = None
+    details: str | None = None
 
 
-class LogListResponse(BaseModel):
-    logs: List[LogEntry]
+class LogListResponse(SchemaModel):
+    logs: list[LogEntry]
     pagination: PaginationMeta
 
 
-class StatsResponse(BaseModel):
+class StatsResponse(SchemaModel):
     enrolled_users: int
     enrolled_fingers: int
     verifications_today: int
@@ -265,22 +262,22 @@ class StatsResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class SystemHealth(BaseModel):
+class SystemHealth(SchemaModel):
     status: str = "healthy"
     uptime_seconds: float
     cpu_percent: float
-    cpu_temp_c: Optional[float] = None
-    gpu_temp_c: Optional[float] = None
+    cpu_temp_c: float | None = None
+    gpu_temp_c: float | None = None
     memory_used_mb: float
     memory_total_mb: float
     disk_used_gb: float
     disk_total_gb: float
     sensor_connected: bool
-    active_model: Optional[str] = None
+    active_model: str | None = None
     device_id: str
 
 
-class ConfigResponse(BaseModel):
+class ConfigResponse(SchemaModel):
     device_id: str
     verify_threshold: float
     identify_threshold: float
@@ -292,11 +289,11 @@ class ConfigResponse(BaseModel):
     debug: bool
 
 
-class ConfigUpdateRequest(BaseModel):
-    verify_threshold: Optional[float] = None
-    identify_threshold: Optional[float] = None
-    identify_top_k: Optional[int] = None
-    debug: Optional[bool] = None
+class ConfigUpdateRequest(SchemaModel):
+    verify_threshold: float | None = None
+    identify_threshold: float | None = None
+    identify_top_k: int | None = None
+    debug: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -304,21 +301,21 @@ class ConfigUpdateRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class SensorStatus(BaseModel):
+class SensorStatus(SchemaModel):
     connected: bool
-    vendor_id: Optional[int] = None
-    product_id: Optional[int] = None
-    firmware_version: Optional[str] = None
-    serial_number: Optional[str] = None
-    resolution_dpi: Optional[int] = None
-    user_count: Optional[int] = None
-    compare_level: Optional[int] = None
+    vendor_id: int | None = None
+    product_id: int | None = None
+    firmware_version: str | None = None
+    serial_number: str | None = None
+    resolution_dpi: int | None = None
+    user_count: int | None = None
+    compare_level: int | None = None
     is_real_hardware: bool = False
 
 
-class CaptureResponse(BaseModel):
+class CaptureResponse(SchemaModel):
     success: bool
-    image_base64: Optional[str] = None
+    image_base64: str | None = None
     width: int = 0
     height: int = 0
     quality_score: float = 0.0
@@ -326,7 +323,7 @@ class CaptureResponse(BaseModel):
     message: str = ""
 
 
-class LEDRequest(BaseModel):
+class LEDRequest(SchemaModel):
     color: str = "green"
     duration_ms: int = Field(default=1000, ge=0, le=10000)
 
@@ -336,15 +333,15 @@ class LEDRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class DeviceInfo(BaseModel):
+class DeviceInfo(SchemaModel):
     device_id: str
     hostname: str
-    ip_address: Optional[str] = None
+    ip_address: str | None = None
     status: str = "online"
     last_seen: datetime = Field(default_factory=datetime.utcnow)
 
 
-class BackupResponse(BaseModel):
+class BackupResponse(SchemaModel):
     success: bool
     filename: str
     size_mb: float
