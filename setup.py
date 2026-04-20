@@ -39,18 +39,18 @@ setup(
     ],
     extras_require={
         "ai": [
-            "onnxruntime>=1.16,<2.0",
+            "onnxruntime>=1.17.3,<1.18",
             "faiss-cpu>=1.7.4,<2.0",
             "opencv-python>=4.8,<5.0",
         ],
         "jetson": [
-            "onnxruntime>=1.16,<2.0",
+            "onnxruntime>=1.17.3,<1.18",
             "faiss-cpu>=1.7.4,<2.0",
             "opencv-python>=4.8,<5.0",
             # TensorRT is expected from JetPack on the target device.
         ],
         "onnx": [
-            "onnxruntime>=1.16,<2.0",
+            "onnxruntime>=1.17.3,<1.18",
         ],
         "faiss": [
             "faiss-cpu>=1.7.4,<2.0",
