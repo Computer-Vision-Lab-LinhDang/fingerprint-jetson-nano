@@ -37,6 +37,8 @@ from app.pipeline.pipeline import VerificationPipeline
 
 logger = logging.getLogger(__name__)
 
+_EMBEDDING_MODEL_EXTENSIONS = (".engine", ".trt", ".onnx", ".pt", ".pth")
+
 
 # ---------------------------------------------------------------------------
 # Result dataclasses
@@ -168,6 +170,32 @@ class PipelineService:
         logger.info("PipelineService ready. Active model=%s", self._active_model)
 
     def _resolve_embedding_model_path(self) -> Optional[str]:
+        def pick_best_candidate(search_root: Path) -> Optional[str]:
+            if not search_root.exists():
+                return None
+
+            if search_root.is_file():
+                return str(search_root)
+
+            candidates = sorted(
+                path for path in search_root.rglob("*")
+                if path.is_file() and path.suffix.lower() in _EMBEDDING_MODEL_EXTENSIONS
+            )
+            if not candidates:
+                return None
+
+            want_tensorrt = self._settings.backend == "tensorrt"
+            preferred_exts = (
+                (".engine", ".trt", ".onnx", ".pt", ".pth")
+                if want_tensorrt
+                else (".onnx", ".engine", ".trt", ".pt", ".pth")
+            )
+            for ext in preferred_exts:
+                for candidate in candidates:
+                    if candidate.suffix.lower() == ext:
+                        return str(candidate)
+            return str(candidates[0])
+
         try:
             from app.services.model_service import get_model_service_sync
             svc = get_model_service_sync()
@@ -181,8 +209,20 @@ class PipelineService:
             logger.warning("Failed to resolve managed embedding model: %s", exc)
 
         env_path = self._settings.model_path
-        if env_path and Path(env_path).exists():
-            return env_path
+        if env_path:
+            resolved = pick_best_candidate(Path(env_path))
+            if resolved:
+                return resolved
+
+        embedding_dir = Path(self._settings.model_dir) / "embedding"
+        resolved = pick_best_candidate(embedding_dir)
+        if resolved:
+            return resolved
+
+        resolved = pick_best_candidate(Path(self._settings.model_dir))
+        if resolved:
+            return resolved
+
         return None
 
     def _load_active_embedding_model(self) -> None:

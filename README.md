@@ -74,3 +74,9 @@ not absolute:
 - `WORKER_DATA_DIR`
 - `WORKER_BACKUP_DIR`
 - `WORKER_MODEL_PATH`
+
+`WORKER_MODEL_PATH` can point to either a specific model file or a directory.
+For Jetson deployments with versioned models, prefer setting it to the embedding
+folder such as `models/embedding`. The worker will then auto-discover the best
+candidate for the active backend, while MQTT-managed downloads still take
+priority via `loaded_models.json`.

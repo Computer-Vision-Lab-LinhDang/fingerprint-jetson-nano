@@ -29,8 +29,11 @@ class Settings(BaseSettings):
         description="Inference backend: 'tensorrt' | 'onnx'",
     )
     model_path: str = Field(
-        default="models/mdgtv2_fp16.engine",
-        description="Path to model file (.engine or .onnx)",
+        default="models/embedding",
+        description=(
+            "Optional path to a model file or a directory containing embedding "
+            "models (.engine, .trt, .onnx)"
+        ),
     )
 
     image_width: int = 192

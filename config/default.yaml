@@ -33,7 +33,7 @@ index:
 # Model
 # ---------------------------------------------------------------------------
 model:
-  model_path: "models/mdgtv2_fp16.engine"
+  model_path: "models/embedding"
   embedding_dim: 512
   image_width: 192
   image_height: 192
