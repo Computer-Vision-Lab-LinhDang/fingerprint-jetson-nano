@@ -40,7 +40,7 @@ setup(
     long_description=README,
     long_description_content_type="text/markdown",
     author="MDGT",
-    python_requires=">=3.6,<3.7",
+    python_requires=">=3.6.2,<3.7",
     packages=find_packages(include=["app*", "gui*"]),
     py_modules=["cli"],
     install_requires=INSTALL_REQUIRES,

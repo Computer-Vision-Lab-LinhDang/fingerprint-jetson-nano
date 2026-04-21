@@ -7,7 +7,7 @@ name = "fingerprint-jetson-worker"
 version = "2.1.0"
 description = "Installable fingerprint worker for Jetson Nano Python 3.6 nodes"
 readme = "README.md"
-requires-python = ">=3.6,<3.7"
+requires-python = ">=3.6.2,<3.7"
 authors = [
   { name = "MDGT" }
 ]
@@ -50,4 +50,3 @@ fingerprint-worker-gui = "gui.__main__:main"
 
 [tool.uv]
 default-groups = []
-project-environment = "venv"
