@@ -40,6 +40,14 @@ logger = logging.getLogger(__name__)
 _EMBEDDING_MODEL_EXTENSIONS = (".engine", ".trt", ".onnx", ".pt", ".pth")
 
 
+def _is_onnxruntime_available() -> bool:
+    try:
+        import onnxruntime  # type: ignore[import-untyped]  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Result dataclasses
 # ---------------------------------------------------------------------------
@@ -236,22 +244,54 @@ class PipelineService:
             logger.warning("No embedding model found on disk.")
             return
 
-        if (
-            self._settings.backend == "tensorrt"
-            and model_path.endswith(".onnx")
-        ):
+        model_name = Path(model_path).name
+        model_suffix = Path(model_path).suffix.lower()
+        wants_tensorrt = self._settings.backend == "tensorrt"
+
+        if wants_tensorrt and model_suffix == ".onnx":
             logger.warning(
                 "TensorRT backend requested but no runnable TensorRT engine is available; "
                 "falling back to ONNX model %s",
                 model_path,
             )
+            if not _is_onnxruntime_available():
+                self._active_model = None
+                self._model_loaded = False
+                logger.error(
+                    "Cannot load fallback ONNX model %s because onnxruntime is not installed.",
+                    model_path,
+                )
+                return
+
+        if model_suffix in (".engine", ".trt") and not wants_tensorrt:
+            logger.info(
+                "ONNX backend configured but selected model is TensorRT engine %s; "
+                "the pipeline will still use TensorRT for this file.",
+                model_path,
+            )
+
+        if model_suffix in (".engine", ".trt"):
+            try:
+                from app.services.model_service import is_tensorrt_runtime_available
+                trt_available = is_tensorrt_runtime_available()
+            except Exception:
+                trt_available = False
+            if not trt_available:
+                self._active_model = None
+                self._model_loaded = False
+                logger.error(
+                    "Cannot load TensorRT engine %s because TensorRT/PyCUDA runtime is unavailable.",
+                    model_path,
+                )
+                return
 
         loaded = self._pipeline.reload_backend(model_path)
-        self._active_model = Path(model_path).name
         self._model_loaded = loaded
         if loaded:
+            self._active_model = model_name
             logger.info("Active embedding model loaded: %s", model_path)
         else:
+            self._active_model = None
             logger.error("Failed to load active embedding model: %s", model_path)
 
     async def _rebuild_faiss_index(self) -> None:

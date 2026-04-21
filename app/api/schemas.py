@@ -276,6 +276,7 @@ class SystemHealth(BaseModel):
     disk_total_gb: float
     sensor_connected: bool
     active_model: Optional[str] = None
+    model_loaded: bool = False
     device_id: str
 
 

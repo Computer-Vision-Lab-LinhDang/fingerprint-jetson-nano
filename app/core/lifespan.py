@@ -73,7 +73,10 @@ async def startup(app: FastAPI) -> None:
     # ------------------------------------------------------------------
     pipeline = PipelineService.get_instance()
     await pipeline.initialize()
-    logger.info("Inference pipeline ready. Active model: %s", pipeline.active_model)
+    if pipeline.is_model_loaded:
+        logger.info("Inference pipeline ready. Active model: %s", pipeline.active_model)
+    else:
+        logger.warning("Inference pipeline started without a loaded model.")
 
     # ------------------------------------------------------------------
     # Step 5: Connect MQTT to orchestrator

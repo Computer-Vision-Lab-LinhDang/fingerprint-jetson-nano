@@ -43,6 +43,7 @@ async def health(
     data = await sys_svc.get_health(
         sensor_connected=sensor.is_connected,
         active_model=pipeline.active_model,
+        model_loaded=pipeline.is_model_loaded,
     )
     return ApiResponse(success=True, data=SystemHealth(**data))
 

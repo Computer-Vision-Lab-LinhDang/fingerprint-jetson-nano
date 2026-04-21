@@ -29,7 +29,10 @@ class SystemService:
     # -- health --------------------------------------------------------------
 
     async def get_health(
-        self, sensor_connected: bool = False, active_model: Optional[str] = None
+        self,
+        sensor_connected: bool = False,
+        active_model: Optional[str] = None,
+        model_loaded: bool = False,
     ) -> Dict[str, Any]:
         """Collect system health metrics."""
         try:
@@ -53,7 +56,7 @@ class SystemService:
         gpu_temp = await self._read_gpu_temp()
 
         return {
-            "status": "healthy",
+            "status": "healthy" if model_loaded else "degraded",
             "uptime_seconds": round(time.time() - self._start_time, 1),
             "cpu_percent": cpu_percent,
             "cpu_temp_c": cpu_temp,
@@ -64,6 +67,7 @@ class SystemService:
             "disk_total_gb": disk_total_gb,
             "sensor_connected": sensor_connected,
             "active_model": active_model,
+            "model_loaded": model_loaded,
             "device_id": self._settings.device_id,
         }
 
