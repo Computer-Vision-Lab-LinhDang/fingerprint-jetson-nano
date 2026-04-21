@@ -11,14 +11,14 @@ packages. Do not create a clean isolated env for this branch.
 cd fingerprint-jetson-nano
 uv venv --python /usr/bin/python3 --system-site-packages venv
 source venv/bin/activate
-uv sync --active --extra jetson
+uv sync --active --no-editable --extra jetson
 ```
 
 If you need the ONNX fallback environment instead of TensorRT:
 
 ```bash
 source venv/bin/activate
-uv sync --active --extra onnx
+uv sync --active --no-editable --extra onnx
 ```
 
 ## Run

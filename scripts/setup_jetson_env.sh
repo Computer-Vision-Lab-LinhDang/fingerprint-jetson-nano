@@ -149,10 +149,10 @@ install_python_deps() {
     backend="$(read_backend)"
     if [ "$backend" = "onnx" ]; then
         echo "WORKER_BACKEND=onnx detected -> syncing ONNX extra"
-        "$UV_BIN" sync --active --extra onnx
+        "$UV_BIN" sync --active --no-editable --extra onnx
     else
         echo "WORKER_BACKEND=$backend -> syncing Jetson/TensorRT environment"
-        "$UV_BIN" sync --active --extra jetson
+        "$UV_BIN" sync --active --no-editable --extra jetson
     fi
 }
 
