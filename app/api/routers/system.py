@@ -210,5 +210,5 @@ async def sync_data(
     except Exception as exc:
         return JSONResponse(
             status_code=500,
-            content=ApiResponse(success=False, error=str(exc)).dict(),
+            content={"success": False, "error": str(exc)},
         )

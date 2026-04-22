@@ -117,13 +117,18 @@ class DatabaseManager:
         self._db_path = str(Path(db_path).resolve())
         self._local = threading.local()
         self._lock = threading.Lock()
-        self._initialized = True
 
         # Ensure parent directory exists
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
 
         # Bootstrap schema
-        self._init_schema()
+        try:
+            self._init_schema()
+        except Exception:
+            self.close()
+            self._initialized = False
+            raise
+        self._initialized = True
         logger.info("DatabaseManager initialised: %s", self._db_path)
 
     # -- Connection management -----------------------------------------------
@@ -170,24 +175,61 @@ class DatabaseManager:
         # type: () -> None
         conn = self._conn
         try:
+            def _get_columns(table_name):
+                cursor = conn.execute("PRAGMA table_info({})".format(table_name))
+                return [row[1] for row in cursor.fetchall()]
+
+            def _ensure_column(table_name, column_name, column_def):
+                if column_name not in _get_columns(table_name):
+                    conn.execute(
+                        "ALTER TABLE {} ADD COLUMN {} {}".format(
+                            table_name, column_name, column_def
+                        )
+                    )
+                    logger.info(
+                        "Migrated SQLite: added %s.%s",
+                        table_name,
+                        column_name,
+                    )
+
             for ddl in _DDL_STATEMENTS:
                 conn.execute(ddl)
             for idx in _INDEX_STATEMENTS:
                 conn.execute(idx)
 
-            # Lightweight migrations
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA table_info(users)")
-            cols = [r[1] for r in cursor.fetchall()]
-            if 'user_id' not in cols:
-                conn.execute("ALTER TABLE users ADD COLUMN user_id TEXT UNIQUE")
-                logger.info("Migrated SQLite: added users.user_id")
+            # Lightweight migrations for legacy worker databases.
+            _ensure_column("users", "user_id", "TEXT")
+            _ensure_column("users", "department", "TEXT NOT NULL DEFAULT ''")
+            _ensure_column("users", "role", "TEXT NOT NULL DEFAULT 'user'")
+            _ensure_column("users", "is_active", "INTEGER NOT NULL DEFAULT 1")
+            _ensure_column(
+                "users",
+                "created_at",
+                "TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            )
+            _ensure_column(
+                "users",
+                "updated_at",
+                "TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            )
 
-            cursor.execute("PRAGMA table_info(fingerprints)")
-            cols = [r[1] for r in cursor.fetchall()]
-            if 'fingerprint_id' not in cols:
-                conn.execute("ALTER TABLE fingerprints ADD COLUMN fingerprint_id TEXT UNIQUE")
-                logger.info("Migrated SQLite: added fingerprints.fingerprint_id")
+            _ensure_column("fingerprints", "fingerprint_id", "TEXT")
+            _ensure_column("fingerprints", "minutiae_enc", "BLOB")
+            _ensure_column("fingerprints", "quality_score", "REAL NOT NULL DEFAULT 0")
+            _ensure_column("fingerprints", "image_hash", "TEXT NOT NULL DEFAULT ''")
+            _ensure_column(
+                "fingerprints",
+                "enrolled_at",
+                "TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            )
+            _ensure_column("fingerprints", "is_active", "INTEGER NOT NULL DEFAULT 1")
+
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_user_id_unique ON users(user_id)"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_fp_fingerprint_id_unique ON fingerprints(fingerprint_id)"
+            )
 
             conn.commit()
         except Exception:

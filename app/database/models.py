@@ -98,6 +98,7 @@ class User:
     """Registered user / employee."""
 
     id: Optional[int] = None
+    user_id: Optional[str] = None
     employee_id: str = ""
     full_name: str = ""
     department: str = ""
@@ -110,6 +111,7 @@ class User:
         # type: () -> dict
         return {
             "id": self.id,
+            "user_id": self.user_id,
             "employee_id": self.employee_id,
             "full_name": self.full_name,
             "department": self.department,
@@ -122,10 +124,27 @@ class User:
     @classmethod
     def from_row(cls, row):
         # type: (tuple) -> User
+        if len(row) >= 9:
+            return cls(
+                id=row[0],
+                user_id=row[1],
+                employee_id=row[2],
+                full_name=row[3],
+                department=row[4],
+                role=row[5],
+                is_active=bool(row[6]),
+                created_at=row[7],
+                updated_at=row[8],
+            )
         return cls(
-            id=row[0], employee_id=row[1], full_name=row[2],
-            department=row[3], role=row[4], is_active=bool(row[5]),
-            created_at=row[6], updated_at=row[7],
+            id=row[0],
+            employee_id=row[1],
+            full_name=row[2],
+            department=row[3],
+            role=row[4],
+            is_active=bool(row[5]),
+            created_at=row[6],
+            updated_at=row[7],
         )
 
     def with_updates(self, **kwargs):
@@ -142,6 +161,7 @@ class Fingerprint:
     """An enrolled fingerprint record (encrypted embeddings stored as BLOBs)."""
 
     id: Optional[int] = None
+    fingerprint_id: Optional[str] = None
     user_id: int = 0
     finger_index: int = 0  # 0-9
     embedding_enc: Optional[bytes] = None
@@ -155,6 +175,7 @@ class Fingerprint:
         # type: () -> dict
         return {
             "id": self.id,
+            "fingerprint_id": self.fingerprint_id,
             "user_id": self.user_id,
             "finger_index": self.finger_index,
             "quality_score": self.quality_score,
@@ -166,11 +187,29 @@ class Fingerprint:
     @classmethod
     def from_row(cls, row):
         # type: (tuple) -> Fingerprint
+        if len(row) >= 10:
+            return cls(
+                id=row[0],
+                fingerprint_id=row[1],
+                user_id=row[2],
+                finger_index=row[3],
+                embedding_enc=row[4],
+                minutiae_enc=row[5],
+                quality_score=float(row[6]),
+                image_hash=row[7],
+                enrolled_at=row[8],
+                is_active=bool(row[9]),
+            )
         return cls(
-            id=row[0], user_id=row[1], finger_index=row[2],
-            embedding_enc=row[3], minutiae_enc=row[4],
-            quality_score=float(row[5]), image_hash=row[6],
-            enrolled_at=row[7], is_active=bool(row[8]),
+            id=row[0],
+            user_id=row[1],
+            finger_index=row[2],
+            embedding_enc=row[3],
+            minutiae_enc=row[4],
+            quality_score=float(row[5]),
+            image_hash=row[6],
+            enrolled_at=row[7],
+            is_active=bool(row[8]),
         )
 
     @staticmethod
