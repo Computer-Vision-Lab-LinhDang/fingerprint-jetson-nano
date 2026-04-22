@@ -148,6 +148,8 @@ _FINGER_INDEX_MAP = {
     FingerEnum.LEFT_LITTLE: 9,
 }
 
+_FINGER_ENUM_BY_INDEX = {value: key for key, value in _FINGER_INDEX_MAP.items()}
+
 
 @router.post("/{user_id}/enroll-finger", response_model=ApiResponse)
 async def enroll_finger(
@@ -155,7 +157,9 @@ async def enroll_finger(
     body: EnrollRequest,
     pipeline: PipelineService = Depends(get_pipeline_service),
 ) -> ApiResponse:
-    finger_idx = _FINGER_INDEX_MAP.get(body.finger, 1)
+    finger_idx = None
+    if body.finger is not None:
+        finger_idx = _FINGER_INDEX_MAP.get(body.finger, 1)
 
     # Decode image if provided (for CLI/remote testing without sensor)
     image_bytes = None
@@ -179,7 +183,7 @@ async def enroll_finger(
         success=True,
         data=EnrollResponse(
             user_id=str(result.user_id),
-            finger=body.finger,
+            finger=_FINGER_ENUM_BY_INDEX.get(result.finger, FingerEnum.RIGHT_INDEX),
             quality_score=result.quality_score,
             template_count=result.template_count,
         ),

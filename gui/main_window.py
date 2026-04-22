@@ -323,22 +323,43 @@ class MainWindow(QMainWindow):
         card_layout = QVBoxLayout(card)
         card_layout.setSpacing(12)
 
-        title = QLabel("Register New User")
+        title = QLabel("Register Fingerprint")
         title.setStyleSheet("color: #f0f6fc; font-size: 18px; font-weight: 700;")
         card_layout.addWidget(title)
 
         desc = QLabel(
-            "Fill in user info, place finger on sensor, then click Register. "
-            "User and fingerprint are saved together."
+            "Create a new user or pick an existing one, then enroll directly "
+            "from the sensor. The worker will use the next available slot automatically."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("color: #8b949e; font-size: 12px;")
         card_layout.addWidget(desc)
 
-        # Step 1: User info
-        step1 = QLabel("① User Information")
+        # Step 1: User mode
+        step1 = QLabel("① Registration Mode")
         step1.setStyleSheet("color: #58a6ff; font-size: 14px; font-weight: 600; margin-top: 8px;")
         card_layout.addWidget(step1)
+
+        mode_form = QFormLayout()
+        mode_form.setSpacing(10)
+        mode_form.setLabelAlignment(Qt.AlignRight)
+
+        self.cmb_register_mode = QComboBox()
+        self.cmb_register_mode.addItem("New user", "new")
+        self.cmb_register_mode.addItem("Existing user", "existing")
+        self.cmb_register_mode.currentIndexChanged.connect(self._on_register_mode_changed)
+        mode_form.addRow("Mode:", self.cmb_register_mode)
+
+        self.cmb_existing_user = QComboBox()
+        self.cmb_existing_user.setMinimumWidth(280)
+        mode_form.addRow("Existing User:", self.cmb_existing_user)
+
+        card_layout.addLayout(mode_form)
+
+        # Step 2: User info
+        step2 = QLabel("② User Information")
+        step2.setStyleSheet("color: #58a6ff; font-size: 14px; font-weight: 600; margin-top: 8px;")
+        card_layout.addWidget(step2)
 
         form = QFormLayout()
         form.setSpacing(10)
@@ -358,10 +379,16 @@ class MainWindow(QMainWindow):
 
         card_layout.addLayout(form)
 
-        # Step 2: Finger hint
-        step2 = QLabel("② Place Finger on Sensor")
-        step2.setStyleSheet("color: #58a6ff; font-size: 14px; font-weight: 600; margin-top: 8px;")
-        card_layout.addWidget(step2)
+        self._new_user_fields = [
+            self.inp_employee_id,
+            self.inp_full_name,
+            self.inp_department,
+        ]
+
+        # Step 3: Finger hint
+        step3 = QLabel("③ Place Finger on Sensor")
+        step3.setStyleSheet("color: #58a6ff; font-size: 14px; font-weight: 600; margin-top: 8px;")
+        card_layout.addWidget(step3)
 
         finger_hint = QLabel(
             "Check the sidebar preview — ensure finger is detected and quality ≥ 30 before clicking Register."
@@ -370,12 +397,12 @@ class MainWindow(QMainWindow):
         finger_hint.setStyleSheet("color: #8b949e; font-size: 12px;")
         card_layout.addWidget(finger_hint)
 
-        # Step 3: Register button
-        step3 = QLabel("③ Save")
-        step3.setStyleSheet("color: #58a6ff; font-size: 14px; font-weight: 600; margin-top: 8px;")
-        card_layout.addWidget(step3)
+        # Step 4: Register button
+        step4 = QLabel("④ Save")
+        step4.setStyleSheet("color: #58a6ff; font-size: 14px; font-weight: 600; margin-top: 8px;")
+        card_layout.addWidget(step4)
 
-        self.btn_register = QPushButton("Register (Create User + Enroll Finger)")
+        self.btn_register = QPushButton("Register")
         self.btn_register.setObjectName("btn_primary")
         self.btn_register.setMinimumHeight(44)
         self.btn_register.clicked.connect(self._do_register)
@@ -393,6 +420,7 @@ class MainWindow(QMainWindow):
         page_layout.setContentsMargins(0, 0, 0, 0)
         page_layout.addWidget(scroll)
         self._stack.addWidget(page)
+        self._on_register_mode_changed()
 
     # ── Results Page ───────────────────────────────────────────────────────
 
@@ -501,11 +529,63 @@ class MainWindow(QMainWindow):
 
         self.lbl_user_count.setText("{} users".format(len(users)))
         self._users_cache = users
+        self._reload_existing_user_options()
+
+    def _reload_existing_user_options(self) -> None:
+        selected_user_id = self.cmb_existing_user.currentData() if hasattr(self, "cmb_existing_user") else None
+        self.cmb_existing_user.clear()
+        for u in getattr(self, "_users_cache", []):
+            display = "{} - {} ({} fingers)".format(
+                u.get("employee_id", ""),
+                u.get("full_name", ""),
+                int(u.get("fingerprint_count", 0) or 0),
+            )
+            self.cmb_existing_user.addItem(display, u.get("id", ""))
+
+        if selected_user_id:
+            idx = self.cmb_existing_user.findData(selected_user_id)
+            if idx >= 0:
+                self.cmb_existing_user.setCurrentIndex(idx)
+
+    def _on_register_mode_changed(self) -> None:
+        mode = self.cmb_register_mode.currentData()
+        is_new = mode != "existing"
+        self.cmb_existing_user.setEnabled(not is_new)
+        for widget in getattr(self, "_new_user_fields", []):
+            widget.setEnabled(is_new)
+        if is_new:
+            self.btn_register.setText("Register (Create User + Enroll Finger)")
+        else:
+            self.btn_register.setText("Register Finger For Existing User")
 
     # ── Register (atomic: create user + enroll) ────────────────────────────
 
     def _do_register(self) -> None:
-        """Atomic registration: create user then immediately enroll fingerprint."""
+        """Register a new user or add a finger to an existing user."""
+        mode = self.cmb_register_mode.currentData()
+
+        if mode == "existing":
+            user_id = self.cmb_existing_user.currentData()
+            if not user_id:
+                self.lbl_register_status.setText("No existing user available.")
+                self.lbl_register_status.setStyleSheet("color: #f85149;")
+                return
+
+            user_name = self.cmb_existing_user.currentText()
+            self._reg_user_id = user_id
+            self._reg_name = user_name
+            self._reg_emp = ""
+            self._reg_created_user = False
+            self.btn_register.setEnabled(False)
+            self.lbl_register_status.setText(
+                "Enrolling fingerprint for {}... keep finger on sensor".format(user_name)
+            )
+            self.lbl_register_status.setStyleSheet("color: #d29922;")
+            self._worker = ApiWorkerThread(self.client.enroll_finger, self._reg_user_id)
+            self._worker.finished.connect(self._on_register_enrolled)
+            self._worker.start()
+            return
+
         emp = self.inp_employee_id.text().strip()
         name = self.inp_full_name.text().strip()
         dept = self.inp_department.text().strip()
@@ -523,6 +603,7 @@ class MainWindow(QMainWindow):
         self._reg_emp = emp
         self._reg_name = name
         self._reg_dept = dept
+        self._reg_created_user = False
 
         self._worker = ApiWorkerThread(self.client.create_user, emp, name, dept, "user")
         self._worker.finished.connect(self._on_register_user_created)
@@ -538,6 +619,7 @@ class MainWindow(QMainWindow):
 
         data = result.get("data", {})
         self._reg_user_id = data.get("id", "")
+        self._reg_created_user = True
 
         # Immediately proceed to enroll
         self.lbl_register_status.setText(
@@ -546,7 +628,7 @@ class MainWindow(QMainWindow):
         self.lbl_register_status.setStyleSheet("color: #d29922;")
 
         self._worker = ApiWorkerThread(
-            self.client.enroll_finger, self._reg_user_id, "right_index"
+            self.client.enroll_finger, self._reg_user_id
         )
         self._worker.finished.connect(self._on_register_enrolled)
         self._worker.start()
@@ -557,8 +639,10 @@ class MainWindow(QMainWindow):
             data = result.get("data", {})
             quality = data.get("quality_score", 0)
             self.lbl_register_status.setText(
-                "✓ Registered! {} ({}) — Quality: {:.0f}".format(
-                    self._reg_name, self._reg_emp, quality
+                "✓ Registered fingerprint for {} {}— Quality: {:.0f}".format(
+                    self._reg_name,
+                    "({}) ".format(self._reg_emp) if self._reg_emp else "",
+                    quality
                 )
             )
             self.lbl_register_status.setStyleSheet("color: #3fb950; font-weight: 600;")
@@ -567,14 +651,17 @@ class MainWindow(QMainWindow):
             self.inp_department.clear()
             self._refresh_users()
         else:
-            # User was created but enroll failed — delete the user to keep atomicity
             error = result.get("error", result.get("data", {}).get("message", "Failed"))
-            self.lbl_register_status.setText(
-                "✗ Enroll failed: {}. User was rolled back.".format(error)
-            )
+            if getattr(self, "_reg_created_user", False):
+                self.lbl_register_status.setText(
+                    "✗ Enroll failed: {}. User was rolled back.".format(error)
+                )
+            else:
+                self.lbl_register_status.setText(
+                    "✗ Enroll failed: {}.".format(error)
+                )
             self.lbl_register_status.setStyleSheet("color: #f85149;")
-            # Rollback: delete the user that was just created
-            if getattr(self, "_reg_user_id", None):
+            if getattr(self, "_reg_created_user", False) and getattr(self, "_reg_user_id", None):
                 rollback = ApiWorkerThread(self.client.delete_user, self._reg_user_id)
                 rollback.finished.connect(lambda _: self._refresh_users())
                 rollback.start()
@@ -683,22 +770,33 @@ class MainWindow(QMainWindow):
             self._show_result("Identify Failed", result.get("error", "Unknown error"), "", "", "danger")
             return
 
-        matches = data.get("matches", [])
-        if not matches:
-            self._show_result("No Match Found", "No matching fingerprint in the gallery.", "0", "", "warning")
+        candidates = data.get("candidates", [])
+        if not candidates:
+            self._show_result(
+                "No Match Found",
+                "No matching fingerprint in the gallery above threshold.",
+                "0",
+                "Threshold: {:.2f}%".format(float(data.get("threshold", 0)) * 100),
+                "warning",
+            )
             return
 
-        top = matches[0]
+        top = candidates[0]
         score = float(top.get("score", 0))
         emp_id = top.get("employee_id", "")
         name = top.get("full_name", "")
+        threshold = float(data.get("threshold", 0))
+        latency = float(data.get("latency_ms", 0))
 
         extras = []
-        for i, m in enumerate(matches[:5]):
+        for i, m in enumerate(candidates[:5]):
             extras.append("{}. {} ({}) — {:.1f}%".format(
                 i + 1, m.get("full_name", ""), m.get("employee_id", ""),
                 float(m.get("score", 0)) * 100
             ))
+        extras.append("Threshold: {:.2f}%  |  Latency: {:.0f}ms".format(
+            threshold * 100, latency
+        ))
 
         self._show_result(
             "🔍 Identified: {} ({})".format(name, emp_id),

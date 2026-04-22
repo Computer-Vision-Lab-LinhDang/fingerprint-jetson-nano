@@ -149,11 +149,14 @@ class ApiClient:
         )
 
     def enroll_finger(
-        self, user_id: str, finger: str = "right_index", num_samples: int = 3
+        self, user_id: str, finger: Optional[str] = None, num_samples: int = 3
     ) -> Dict[str, Any]:
+        payload = {"num_samples": num_samples}
+        if finger:
+            payload["finger"] = finger
         return self._post(
             "/users/{}/enroll-finger".format(user_id),
-            {"finger": finger, "num_samples": num_samples},
+            payload,
         )
 
     def delete_user(self, user_id: str) -> Dict[str, Any]:

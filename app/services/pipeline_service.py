@@ -459,6 +459,26 @@ class PipelineService:
         await self._rebuild_faiss_index()
         return True
 
+    async def get_next_available_finger_index(self, user_id: int) -> Optional[int]:
+        if self._fp_repo is None:
+            return 0
+
+        loop = asyncio.get_event_loop()
+        fingerprints = await loop.run_in_executor(
+            None, self._fp_repo.get_by_user_id, user_id, True
+        )
+        used_indices = set()
+        for fp in fingerprints:
+            try:
+                used_indices.add(int(fp.finger_index))
+            except Exception:
+                continue
+
+        for finger_index in range(10):
+            if finger_index not in used_indices:
+                return finger_index
+        return None
+
     async def sync_remote_user_deleted(self, data: Dict[str, Any]) -> bool:
         """Delete a locally cached user after an orchestrator delete event."""
         if self._user_repo is None:
@@ -675,7 +695,7 @@ class PipelineService:
     async def enroll_user(
         self,
         user_id: int,
-        finger: int,
+        finger: Optional[int] = None,
         num_samples: int = 3,
         image_bytes: Optional[bytes] = None,
     ) -> EnrollResult:
@@ -688,6 +708,19 @@ class PipelineService:
             image_bytes: Optional pre-captured image bytes (for mock/remote use).
         """
         async with self._lock:
+            selected_finger = finger
+            if selected_finger is None:
+                selected_finger = await self.get_next_available_finger_index(user_id)
+                if selected_finger is None:
+                    return EnrollResult(
+                        user_id=user_id,
+                        finger=0,
+                        quality_score=0.0,
+                        template_count=0,
+                        success=False,
+                        message="User already has the maximum number of registered fingerprints",
+                    )
+
             # Validate user exists
             user = None
             if self._user_repo is not None:
@@ -697,7 +730,7 @@ class PipelineService:
                 )
                 if user_obj is None:
                     return EnrollResult(
-                        user_id=user_id, finger=finger,
+                        user_id=user_id, finger=selected_finger,
                         quality_score=0.0, template_count=0,
                         success=False, message="User not found",
                     )
@@ -710,7 +743,7 @@ class PipelineService:
                 capture = await sensor.capture_image()
                 if not capture.success:
                     return EnrollResult(
-                        user_id=user_id, finger=finger,
+                        user_id=user_id, finger=selected_finger,
                         quality_score=0.0, template_count=0,
                         success=False, message="Sensor capture failed: {}".format(capture.error),
                     )
@@ -722,7 +755,7 @@ class PipelineService:
             # Run pipeline to extract embedding
             if self._pipeline is None:
                 return EnrollResult(
-                    user_id=user_id, finger=finger,
+                    user_id=user_id, finger=selected_finger,
                     quality_score=quality, template_count=0,
                     success=False, message="Pipeline not initialized",
                 )
@@ -732,7 +765,7 @@ class PipelineService:
             except Exception as exc:
                 logger.error("Pipeline inference failed: %s", exc)
                 return EnrollResult(
-                    user_id=user_id, finger=finger,
+                    user_id=user_id, finger=selected_finger,
                     quality_score=quality, template_count=0,
                     success=False, message="Inference failed: {}".format(exc),
                 )
@@ -740,7 +773,7 @@ class PipelineService:
             # Check if embedding is all-zero (no minutiae detected)
             if np.allclose(embedding, 0.0):
                 return EnrollResult(
-                    user_id=user_id, finger=finger,
+                    user_id=user_id, finger=selected_finger,
                     quality_score=quality, template_count=0,
                     success=False, message="No minutiae detected in image",
                 )
@@ -754,7 +787,7 @@ class PipelineService:
                 duplicate = duplicate_candidates[0]
                 return EnrollResult(
                     user_id=user_id,
-                    finger=finger,
+                    finger=selected_finger,
                     quality_score=quality,
                     template_count=0,
                     success=False,
@@ -779,7 +812,7 @@ class PipelineService:
 
             fp_record = Fingerprint(
                 user_id=user_id,
-                finger_index=finger,
+                finger_index=selected_finger,
                 embedding_enc=embedding_enc,
                 quality_score=quality,
                 image_hash=image_hash,
@@ -806,7 +839,7 @@ class PipelineService:
 
             logger.info(
                 "Enrolled fingerprint for user %d, finger %d (quality=%.1f)",
-                user_id, finger, quality,
+                user_id, selected_finger, quality,
             )
 
             # --- Upstream: broadcast enrollment to orchestrator via MQTT ---
@@ -814,7 +847,7 @@ class PipelineService:
                 self._publish_enrollment_event(
                     user_obj=user,
                     fp_id=fp_id if self._fp_repo else 0,
-                    finger_index=finger,
+                    finger_index=selected_finger,
                     embedding_list=embedding_list,
                     quality_score=quality,
                 )
@@ -823,7 +856,7 @@ class PipelineService:
 
             return EnrollResult(
                 user_id=user_id,
-                finger=finger,
+                finger=selected_finger,
                 quality_score=quality,
                 template_count=count,
             )
