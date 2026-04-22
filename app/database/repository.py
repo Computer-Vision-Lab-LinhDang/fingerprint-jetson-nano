@@ -15,6 +15,19 @@ from app.database.models import Fingerprint, User, VerificationLog
 
 logger = logging.getLogger(__name__)
 
+_USER_COLUMNS = (
+    "id, user_id, employee_id, full_name, department, role, "
+    "is_active, created_at, updated_at"
+)
+_FINGERPRINT_COLUMNS = (
+    "id, fingerprint_id, user_id, finger_index, embedding_enc, "
+    "minutiae_enc, quality_score, image_hash, enrolled_at, is_active"
+)
+_VERIFICATION_LOG_COLUMNS = (
+    "id, matched_user_id, matched_fp_id, mode, score, decision, "
+    "latency_ms, device_id, timestamp, probe_quality"
+)
+
 
 def _utcnow():
     # type: () -> str
@@ -42,20 +55,24 @@ class UserRepository:
              user.role, int(user.is_active)),
         )
         row = self._db.fetch_one(
-            "SELECT * FROM users WHERE employee_id = ?",
+            "SELECT {} FROM users WHERE employee_id = ?".format(_USER_COLUMNS),
             (user.employee_id,),
         )
         return User.from_row(row) if row else user
 
     def get_by_id(self, user_id):
         # type: (int) -> Optional[User]
-        row = self._db.fetch_one("SELECT * FROM users WHERE id = ?", (user_id,))
+        row = self._db.fetch_one(
+            "SELECT {} FROM users WHERE id = ?".format(_USER_COLUMNS),
+            (user_id,),
+        )
         return User.from_row(row) if row else None
 
     def get_by_employee_id(self, employee_id):
         # type: (str) -> Optional[User]
         row = self._db.fetch_one(
-            "SELECT * FROM users WHERE employee_id = ?", (employee_id,),
+            "SELECT {} FROM users WHERE employee_id = ?".format(_USER_COLUMNS),
+            (employee_id,),
         )
         return User.from_row(row) if row else None
 
@@ -63,17 +80,23 @@ class UserRepository:
         # type: (bool) -> List[User]
         if active_only:
             rows = self._db.fetch_all(
-                "SELECT * FROM users WHERE is_active = 1 ORDER BY id",
+                "SELECT {} FROM users WHERE is_active = 1 ORDER BY id".format(
+                    _USER_COLUMNS
+                ),
             )
         else:
-            rows = self._db.fetch_all("SELECT * FROM users ORDER BY id")
+            rows = self._db.fetch_all(
+                "SELECT {} FROM users ORDER BY id".format(_USER_COLUMNS)
+            )
         return [User.from_row(r) for r in rows]
 
     def search(self, query, active_only=True):
         # type: (str, bool) -> List[User]
         pattern = "%{}%".format(query)
-        sql = """SELECT * FROM users
-                 WHERE (employee_id LIKE ? OR full_name LIKE ?)"""
+        sql = """SELECT {} FROM users
+                 WHERE (employee_id LIKE ? OR full_name LIKE ?)""".format(
+            _USER_COLUMNS
+        )
         if active_only:
             sql += " AND is_active = 1"
         sql += " ORDER BY id"
@@ -138,9 +161,9 @@ class FingerprintRepository:
              fp.minutiae_enc, fp.quality_score, fp.image_hash),
         )
         row = self._db.fetch_one(
-            """SELECT * FROM fingerprints
+            """SELECT {} FROM fingerprints
                WHERE user_id = ? AND finger_index = ?
-               ORDER BY id DESC LIMIT 1""",
+               ORDER BY id DESC LIMIT 1""".format(_FINGERPRINT_COLUMNS),
             (fp.user_id, fp.finger_index),
         )
         return Fingerprint.from_row(row) if row else fp
@@ -148,13 +171,16 @@ class FingerprintRepository:
     def get_by_id(self, fp_id):
         # type: (int) -> Optional[Fingerprint]
         row = self._db.fetch_one(
-            "SELECT * FROM fingerprints WHERE id = ?", (fp_id,),
+            "SELECT {} FROM fingerprints WHERE id = ?".format(_FINGERPRINT_COLUMNS),
+            (fp_id,),
         )
         return Fingerprint.from_row(row) if row else None
 
     def get_by_user_id(self, user_id, active_only=True):
         # type: (int, bool) -> List[Fingerprint]
-        sql = "SELECT * FROM fingerprints WHERE user_id = ?"
+        sql = "SELECT {} FROM fingerprints WHERE user_id = ?".format(
+            _FINGERPRINT_COLUMNS
+        )
         if active_only:
             sql += " AND is_active = 1"
         rows = self._db.fetch_all(sql, (user_id,))
@@ -162,7 +188,9 @@ class FingerprintRepository:
 
     def get_by_image_hash(self, image_hash, active_only=True):
         # type: (str, bool) -> Optional[Fingerprint]
-        sql = "SELECT * FROM fingerprints WHERE image_hash = ?"
+        sql = "SELECT {} FROM fingerprints WHERE image_hash = ?".format(
+            _FINGERPRINT_COLUMNS
+        )
         if active_only:
             sql += " AND is_active = 1"
         sql += " ORDER BY id DESC LIMIT 1"
@@ -261,14 +289,18 @@ class VerificationLogRepository:
              log.device_id, log.probe_quality),
         )
         row = self._db.fetch_one(
-            "SELECT * FROM verification_logs ORDER BY id DESC LIMIT 1",
+            "SELECT {} FROM verification_logs ORDER BY id DESC LIMIT 1".format(
+                _VERIFICATION_LOG_COLUMNS
+            ),
         )
         return VerificationLog.from_row(row) if row else log
 
     def get_recent(self, limit=50):
         # type: (int) -> List[VerificationLog]
         rows = self._db.fetch_all(
-            "SELECT * FROM verification_logs ORDER BY id DESC LIMIT ?",
+            "SELECT {} FROM verification_logs ORDER BY id DESC LIMIT ?".format(
+                _VERIFICATION_LOG_COLUMNS
+            ),
             (limit,),
         )
         return [VerificationLog.from_row(r) for r in rows]
@@ -276,8 +308,10 @@ class VerificationLogRepository:
     def get_by_user(self, user_id, limit=50):
         # type: (int, int) -> List[VerificationLog]
         rows = self._db.fetch_all(
-            """SELECT * FROM verification_logs
-               WHERE matched_user_id = ? ORDER BY id DESC LIMIT ?""",
+            """SELECT {} FROM verification_logs
+               WHERE matched_user_id = ? ORDER BY id DESC LIMIT ?""".format(
+                _VERIFICATION_LOG_COLUMNS
+            ),
             (user_id, limit),
         )
         return [VerificationLog.from_row(r) for r in rows]
