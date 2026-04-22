@@ -139,6 +139,7 @@ class FingerprintResponse(BaseModel):
 class EnrollRequest(BaseModel):
     finger: FingerEnum = FingerEnum.RIGHT_INDEX
     num_samples: int = Field(default=3, ge=1, le=10)
+    image_base64: Optional[str] = None
 
 
 class EnrollResponse(BaseModel):

@@ -8,6 +8,8 @@ Features:
   - MQTT monitoring (heartbeats, tasks, model updates from orchestrator)
 """
 
+import base64
+import glob
 import json
 import os
 import sys
@@ -251,6 +253,8 @@ def print_menu():
     print("  {yellow}{line}{reset}".format(yellow=C.YELLOW, line="─" * 48, reset=C.RESET))
     print("  {bold}[8]{reset}  📡  MQTT Event Log".format(bold=C.BOLD, reset=C.RESET))
     print("  {bold}[9]{reset}  📈  MQTT Statistics".format(bold=C.BOLD, reset=C.RESET))
+    print("  {bold}[t]{reset}  🧪  Test (image-based)".format(bold=C.BOLD, reset=C.RESET))
+    print("  {yellow}{line}{reset}".format(yellow=C.YELLOW, line="─" * 48, reset=C.RESET))
     print("  {bold}[r]{reset}  🔄  Reconnect MQTT".format(bold=C.BOLD, reset=C.RESET))
     print("  {bold}[c]{reset}  🧹  Clear Screen".format(bold=C.BOLD, reset=C.RESET))
     print("  {bold}[0]{reset}  🚪  Exit".format(bold=C.BOLD, reset=C.RESET))
@@ -600,6 +604,239 @@ def cmd_mqtt_stats():
     print()
 
 
+# ── [t] Test (image-based) ──────────────────────────────────
+
+def _get_sample_dir():
+    """Return the path to the data/sample directory."""
+    base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, "data", "sample")
+
+
+def _pick_sample_image():
+    """List sample images and let the user pick one. Returns (path, base64_str) or (None, None)."""
+    sample_dir = _get_sample_dir()
+    if not os.path.isdir(sample_dir):
+        print("  {red}✗ Sample directory not found: {d}{reset}".format(red=C.RED, d=sample_dir, reset=C.RESET))
+        return None, None
+
+    images = sorted(glob.glob(os.path.join(sample_dir, "*.tif")))
+    images += sorted(glob.glob(os.path.join(sample_dir, "*.png")))
+    images += sorted(glob.glob(os.path.join(sample_dir, "*.bmp")))
+
+    if not images:
+        print("  {red}✗ No sample images found in {d}{reset}".format(red=C.RED, d=sample_dir, reset=C.RESET))
+        return None, None
+
+    print("\n  {bold}▸ Select a fingerprint image:{reset}".format(bold=C.BOLD, reset=C.RESET))
+    for i, path in enumerate(images, 1):
+        name = os.path.basename(path)
+        size_kb = os.path.getsize(path) / 1024
+        print("    {bold}[{i}]{reset} {name}  {dim}({s:.0f} KB){reset}".format(
+            bold=C.BOLD, reset=C.RESET, i=i, name=name, dim=C.DIM, s=size_kb))
+
+    try:
+        idx = int(input("\n  {yellow}▸ Image [1-{n}]: {reset}".format(
+            yellow=C.YELLOW, n=len(images), reset=C.RESET)).strip()) - 1
+        if idx < 0 or idx >= len(images):
+            print("  {red}✗ Invalid{reset}".format(red=C.RED, reset=C.RESET))
+            return None, None
+    except (ValueError, EOFError):
+        print("  {red}✗ Invalid{reset}".format(red=C.RED, reset=C.RESET))
+        return None, None
+
+    path = images[idx]
+    with open(path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("ascii")
+
+    print("  {green}✓ Loaded: {name}{reset}".format(
+        green=C.GREEN, name=os.path.basename(path), reset=C.RESET))
+    return path, b64
+
+
+def _test_register():
+    """Register a new user and enroll with a sample image."""
+    print("\n  {cyan}{bold}─── TEST REGISTER ───{reset}\n".format(cyan=C.CYAN, bold=C.BOLD, reset=C.RESET))
+
+    emp_id = input("  {yellow}▸ Employee ID:{reset} ".format(yellow=C.YELLOW, reset=C.RESET)).strip()
+    name = input("  {yellow}▸ Full Name:{reset} ".format(yellow=C.YELLOW, reset=C.RESET)).strip()
+    dept = input("  {yellow}▸ Department (optional):{reset} ".format(yellow=C.YELLOW, reset=C.RESET)).strip()
+
+    if not emp_id or not name:
+        print("  {red}✗ Employee ID and Name are required.{reset}".format(red=C.RED, reset=C.RESET))
+        return
+
+    # Step 1: Create user
+    payload = {"employee_id": emp_id, "full_name": name}
+    if dept:
+        payload["department"] = dept
+
+    print("\n  {yellow}⏳ Creating user...{reset}".format(yellow=C.YELLOW, reset=C.RESET))
+    res = api_request("POST", "/users", payload)
+    if not res.get("success"):
+        print("  {red}✗ Failed: {d}{reset}".format(red=C.RED, d=res.get("detail", res.get("error", str(res))), reset=C.RESET))
+        return
+
+    user = res["data"]
+    user_id = user["id"]
+    print("  {green}✓ User created (ID: {uid}){reset}".format(green=C.GREEN, uid=user_id, reset=C.RESET))
+
+    # Step 2: Select finger
+    fingers = ["right_index", "right_middle", "right_thumb", "left_index", "left_middle", "left_thumb"]
+    print("\n  {bold}▸ Select Finger:{reset}".format(bold=C.BOLD, reset=C.RESET))
+    for i, f in enumerate(fingers, 1):
+        print("    {bold}[{i}]{reset} {f}".format(bold=C.BOLD, reset=C.RESET, i=i, f=f))
+    try:
+        fi = int(input("  {yellow}▸ Finger [1-6]: {reset}".format(yellow=C.YELLOW, reset=C.RESET)).strip()) - 1
+        if fi < 0 or fi >= len(fingers): fi = 0
+    except (ValueError, EOFError):
+        fi = 0
+
+    # Step 3: Pick a sample image
+    path, b64 = _pick_sample_image()
+    if b64 is None:
+        return
+
+    # Step 4: Enroll
+    print("\n  {yellow}⏳ Enrolling fingerprint...{reset}".format(yellow=C.YELLOW, reset=C.RESET))
+    enroll_res = api_request("POST", "/users/{}/enroll-finger".format(user_id),
+                             {"finger": fingers[fi], "num_samples": 1, "image_base64": b64}, timeout=30)
+    if enroll_res.get("success"):
+        d = enroll_res["data"]
+        print("  {green}✓ Enrolled!{reset}  Quality: {q:.1f}  Templates: {t}".format(
+            green=C.GREEN, reset=C.RESET,
+            q=d.get("quality_score", 0), t=d.get("template_count", "?")))
+    else:
+        print("  {red}✗ Enroll failed: {d}{reset}".format(red=C.RED,
+            d=enroll_res.get("detail", enroll_res.get("error", str(enroll_res))), reset=C.RESET))
+    print()
+
+
+def _test_verify():
+    """Verify 1:1 with a sample image."""
+    print("\n  {cyan}{bold}─── TEST VERIFY 1:1 ───{reset}\n".format(cyan=C.CYAN, bold=C.BOLD, reset=C.RESET))
+
+    # Pick user
+    res = api_request("GET", "/users?limit=50")
+    users = res.get("data", {}).get("users", []) if res.get("success") else []
+    enrolled = [u for u in users if u.get("fingerprint_count", 0) > 0]
+
+    if not enrolled:
+        print("  {red}✗ No users with fingerprints found. Register first.{reset}".format(red=C.RED, reset=C.RESET))
+        return
+
+    print("  {bold}▸ Users with fingerprints:{reset}".format(bold=C.BOLD, reset=C.RESET))
+    for i, u in enumerate(enrolled, 1):
+        print("    {bold}[{i}]{reset} {name} ({eid})".format(
+            bold=C.BOLD, reset=C.RESET, i=i,
+            name=u.get("full_name", ""), eid=u.get("employee_id", "")))
+    try:
+        idx = int(input("\n  {yellow}▸ User [1-{n}]: {reset}".format(
+            yellow=C.YELLOW, n=len(enrolled), reset=C.RESET)).strip()) - 1
+        if idx < 0 or idx >= len(enrolled):
+            print("  {red}✗ Invalid{reset}".format(red=C.RED, reset=C.RESET)); return
+        user_id = enrolled[idx]["id"]
+    except (ValueError, EOFError):
+        print("  {red}✗ Invalid{reset}".format(red=C.RED, reset=C.RESET)); return
+
+    # Pick image
+    path, b64 = _pick_sample_image()
+    if b64 is None:
+        return
+
+    # Verify
+    print("\n  {yellow}⏳ Verifying...{reset}".format(yellow=C.YELLOW, reset=C.RESET))
+    res = api_request("POST", "/verify", {"user_id": user_id, "image_base64": b64}, timeout=20)
+
+    if not res.get("success"):
+        print("  {red}✗ Error: {d}{reset}".format(red=C.RED,
+            d=res.get("detail", res.get("error", "")), reset=C.RESET)); return
+
+    d = res["data"]
+    print()
+    if d.get("matched"):
+        print("  {green}{bold}┌─────────────────────────────────┐{reset}".format(green=C.GREEN, bold=C.BOLD, reset=C.RESET))
+        print("  {green}{bold}│     ✅  MATCH — VERIFIED        │{reset}".format(green=C.GREEN, bold=C.BOLD, reset=C.RESET))
+        print("  {green}{bold}└─────────────────────────────────┘{reset}".format(green=C.GREEN, bold=C.BOLD, reset=C.RESET))
+    else:
+        print("  {red}{bold}┌─────────────────────────────────┐{reset}".format(red=C.RED, bold=C.BOLD, reset=C.RESET))
+        print("  {red}{bold}│     ❌  REJECTED — NO MATCH     │{reset}".format(red=C.RED, bold=C.BOLD, reset=C.RESET))
+        print("  {red}{bold}└─────────────────────────────────┘{reset}".format(red=C.RED, bold=C.BOLD, reset=C.RESET))
+    print("    Score: {bold}{s:.4f}{reset}  Threshold: {t:.2f}  Latency: {l:.0f}ms".format(
+        s=d.get("score", 0), t=d.get("threshold", 0), l=d.get("latency_ms", 0),
+        bold=C.BOLD, reset=C.RESET))
+    print()
+
+
+def _test_identify():
+    """Identify 1:N with a sample image."""
+    print("\n  {cyan}{bold}─── TEST IDENTIFY 1:N ───{reset}\n".format(cyan=C.CYAN, bold=C.BOLD, reset=C.RESET))
+
+    # Pick image
+    path, b64 = _pick_sample_image()
+    if b64 is None:
+        return
+
+    # Identify
+    print("\n  {yellow}⏳ Identifying...{reset}".format(yellow=C.YELLOW, reset=C.RESET))
+    res = api_request("POST", "/identify", {"top_k": 5, "image_base64": b64}, timeout=20)
+    if not res.get("success"):
+        print("  {red}✗ Error: {d}{reset}".format(red=C.RED,
+            d=res.get("detail", res.get("error", "")), reset=C.RESET)); return
+
+    d = res["data"]
+    candidates = d.get("candidates", [])
+    print()
+    if d.get("identified") and candidates:
+        best = candidates[0]
+        print("  {green}{bold}┌─────────────────────────────────┐{reset}".format(green=C.GREEN, bold=C.BOLD, reset=C.RESET))
+        print("  {green}{bold}│     ✅  IDENTIFIED              │{reset}".format(green=C.GREEN, bold=C.BOLD, reset=C.RESET))
+        print("  {green}{bold}└─────────────────────────────────┘{reset}".format(green=C.GREEN, bold=C.BOLD, reset=C.RESET))
+        print("    Name  : {bold}{name}{reset}".format(bold=C.BOLD, name=best.get("full_name", "?"), reset=C.RESET))
+        print("    EmpID : {bold}{eid}{reset}".format(bold=C.BOLD, eid=best.get("employee_id", "?"), reset=C.RESET))
+        print("    Score : {bold}{s:.4f}{reset}  Threshold: {t:.2f}".format(
+            s=best.get("score", 0), t=d.get("threshold", 0), bold=C.BOLD, reset=C.RESET))
+        if len(candidates) > 1:
+            print("\n  {dim}Other candidates:{reset}".format(dim=C.DIM, reset=C.RESET))
+            for c in candidates[1:]:
+                print("    {dim}• {name} ({eid}) — score {s:.4f}{reset}".format(
+                    dim=C.DIM, name=c.get("full_name", "?"),
+                    eid=c.get("employee_id", "?"), s=c.get("score", 0), reset=C.RESET))
+    else:
+        print("  {red}{bold}┌─────────────────────────────────┐{reset}".format(red=C.RED, bold=C.BOLD, reset=C.RESET))
+        print("  {red}{bold}│     ❌  NO MATCH FOUND          │{reset}".format(red=C.RED, bold=C.BOLD, reset=C.RESET))
+        print("  {red}{bold}└─────────────────────────────────┘{reset}".format(red=C.RED, bold=C.BOLD, reset=C.RESET))
+
+    print("    Latency: {l:.0f}ms".format(l=d.get("latency_ms", 0)))
+    print()
+
+
+def cmd_test():
+    """Test menu: register, verify, identify using sample images."""
+    print("\n  {cyan}{bold}═══ TEST MODE (image-based) ═══{reset}\n".format(cyan=C.CYAN, bold=C.BOLD, reset=C.RESET))
+    print("  {dim}Use sample images from data/sample/ instead of sensor.{reset}\n".format(dim=C.DIM, reset=C.RESET))
+    print("  {bold}[1]{reset}  📝  Register (create user + enroll with image)".format(bold=C.BOLD, reset=C.RESET))
+    print("  {bold}[2]{reset}  🔍  Verify 1:1 (compare image against a user)".format(bold=C.BOLD, reset=C.RESET))
+    print("  {bold}[3]{reset}  🔎  Identify 1:N (find who the image belongs to)".format(bold=C.BOLD, reset=C.RESET))
+    print("  {bold}[0]{reset}  ↩️   Back".format(bold=C.BOLD, reset=C.RESET))
+
+    try:
+        choice = input("\n  {yellow}{bold}▸ Select: {reset}".format(
+            yellow=C.YELLOW, bold=C.BOLD, reset=C.RESET)).strip()
+    except (KeyboardInterrupt, EOFError):
+        return
+
+    if choice == "1":
+        _test_register()
+    elif choice == "2":
+        _test_verify()
+    elif choice == "3":
+        _test_identify()
+    elif choice == "0":
+        return
+    else:
+        print("  {red}Invalid choice{reset}".format(red=C.RED, reset=C.RESET))
+
+
 # ── [r] Reconnect MQTT ──────────────────────────────────────
 def cmd_reconnect():
     print("\n  {cyan}{bold}═══ RECONNECT MQTT ═══{reset}\n".format(cyan=C.CYAN, bold=C.BOLD, reset=C.RESET))
@@ -659,6 +896,7 @@ def run_cli():
         "7": cmd_models,
         "8": cmd_mqtt_log,
         "9": cmd_mqtt_stats,
+        "t": cmd_test,
         "r": cmd_reconnect,
         "c": lambda: (clear_screen(), print_banner()),
     }

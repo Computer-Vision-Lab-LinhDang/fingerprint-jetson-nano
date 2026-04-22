@@ -156,10 +156,21 @@ async def enroll_finger(
     pipeline: PipelineService = Depends(get_pipeline_service),
 ) -> ApiResponse:
     finger_idx = _FINGER_INDEX_MAP.get(body.finger, 1)
+
+    # Decode image if provided (for CLI/remote testing without sensor)
+    image_bytes = None
+    if body.image_base64:
+        import base64
+        try:
+            image_bytes = base64.b64decode(body.image_base64)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Invalid image_base64: {}".format(exc))
+
     result = await pipeline.enroll_user(
         user_id=int(user_id),
         finger=finger_idx,
         num_samples=body.num_samples,
+        image_bytes=image_bytes,
     )
     if not result.success:
         raise HTTPException(status_code=400, detail=result.message)
