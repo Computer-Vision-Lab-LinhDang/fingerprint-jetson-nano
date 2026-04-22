@@ -665,7 +665,12 @@ def _test_register():
         print("  {red}✗ Employee ID and Name are required.{reset}".format(red=C.RED, reset=C.RESET))
         return
 
-    # Step 1: Create user
+    # Step 1: Pick a sample fingerprint image
+    path, b64 = _pick_sample_image()
+    if b64 is None:
+        return
+
+    # Step 2: Create user
     payload = {"employee_id": emp_id, "full_name": name}
     if dept:
         payload["department"] = dept
@@ -680,26 +685,10 @@ def _test_register():
     user_id = user["id"]
     print("  {green}✓ User created (ID: {uid}){reset}".format(green=C.GREEN, uid=user_id, reset=C.RESET))
 
-    # Step 2: Select finger
-    fingers = ["right_index", "right_middle", "right_thumb", "left_index", "left_middle", "left_thumb"]
-    print("\n  {bold}▸ Select Finger:{reset}".format(bold=C.BOLD, reset=C.RESET))
-    for i, f in enumerate(fingers, 1):
-        print("    {bold}[{i}]{reset} {f}".format(bold=C.BOLD, reset=C.RESET, i=i, f=f))
-    try:
-        fi = int(input("  {yellow}▸ Finger [1-6]: {reset}".format(yellow=C.YELLOW, reset=C.RESET)).strip()) - 1
-        if fi < 0 or fi >= len(fingers): fi = 0
-    except (ValueError, EOFError):
-        fi = 0
-
-    # Step 3: Pick a sample image
-    path, b64 = _pick_sample_image()
-    if b64 is None:
-        return
-
-    # Step 4: Enroll
-    print("\n  {yellow}⏳ Enrolling fingerprint...{reset}".format(yellow=C.YELLOW, reset=C.RESET))
+    # Step 3: Enroll fingerprint (auto: right_index)
+    print("  {yellow}⏳ Enrolling fingerprint...{reset}".format(yellow=C.YELLOW, reset=C.RESET))
     enroll_res = api_request("POST", "/users/{}/enroll-finger".format(user_id),
-                             {"finger": fingers[fi], "num_samples": 1, "image_base64": b64}, timeout=30)
+                             {"finger": "right_index", "num_samples": 1, "image_base64": b64}, timeout=30)
     if enroll_res.get("success"):
         d = enroll_res["data"]
         print("  {green}✓ Enrolled!{reset}  Quality: {q:.1f}  Templates: {t}".format(
