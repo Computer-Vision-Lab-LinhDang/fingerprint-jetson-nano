@@ -445,6 +445,10 @@ class ModelService:
         matching file for the current runtime/backend preference.
         """
         type_dir = self._model_dir / model_type
+        with self._lock:
+            model_ref = self._loaded_models.get(model_type, "")
+        normalized_ref = self._normalize_loaded_ref(model_ref)
+
         search_root = self._resolve_loaded_scope(model_type) or type_dir
         if not search_root.exists():
             return None
@@ -455,6 +459,15 @@ class ModelService:
             candidates = self._collect_candidate_models(type_dir)
         if not candidates:
             return None
+
+        if normalized_ref:
+            filtered = [
+                candidate
+                for candidate in candidates
+                if self._normalize_loaded_ref(candidate.relative_to(type_dir).as_posix()) == normalized_ref
+            ]
+            if filtered:
+                candidates = filtered
 
         want_tensorrt = (
             backend_preference == "tensorrt" and is_tensorrt_runtime_available()
