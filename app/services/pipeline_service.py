@@ -466,53 +466,128 @@ class PipelineService:
         if self._db is None or self._user_repo is None or self._fp_repo is None:
             raise RuntimeError("Database not available")
 
-        users_data = payload.get("users", [])
-        fps_data = payload.get("fingerprints", [])
+        users_data = payload.get("users") or []
+        fps_data = payload.get("fingerprints") or []
 
         loop = asyncio.get_event_loop()
 
-        def _sync_tx(conn: sqlite3.Connection):
-            # 1. Wipe existing data
-            conn.execute("DELETE FROM verification_logs")
-            conn.execute("DELETE FROM fingerprints")
-            conn.execute("DELETE FROM users")
+        def _normalize_embedding(raw_embedding: Any) -> Optional[list]:
+            if isinstance(raw_embedding, str):
+                cleaned = raw_embedding.strip().strip("[]")
+                if not cleaned:
+                    return None
+                raw_embedding = [part.strip() for part in cleaned.split(",") if part.strip()]
 
-            # 2. Insert users
-            user_id_map = {}  # server user_id -> sqlite local id
-            for u in users_data:
-                cursor = conn.execute(
-                    "INSERT INTO users (user_id, employee_id, full_name, department, role, is_active) VALUES (?, ?, ?, ?, ?, ?)",
-                    (u.get("user_id"), u.get("employee_id"), u.get("full_name"), u.get("department", ""), u.get("role", "user"), 1 if u.get("is_active", True) else 0)
-                )
-                user_id_map[u.get("user_id")] = cursor.lastrowid
+            if not isinstance(raw_embedding, (list, tuple)):
+                return None
 
-            # 3. Insert fingerprints
-            for fp in fps_data:
-                srv_user_id = fp.get("user_id")
-                local_user_id = user_id_map.get(srv_user_id)
-                if not local_user_id:
-                    continue
+            try:
+                vector = [float(value) for value in raw_embedding]
+            except (TypeError, ValueError):
+                return None
 
-                emb_enc = None
-                embedding_list = fp.get("embedding", [])
-                if embedding_list:
+            if not vector:
+                return None
+            if len(vector) > EMBEDDING_DIM:
+                vector = vector[:EMBEDDING_DIM]
+            elif len(vector) < EMBEDDING_DIM:
+                vector = vector + [0.0] * (EMBEDDING_DIM - len(vector))
+            return vector
+
+        def _sync_tx() -> Tuple[int, int]:
+            with self._db.transaction() as conn:
+                conn.execute("DELETE FROM verification_logs")
+                conn.execute("DELETE FROM fingerprints")
+                conn.execute("DELETE FROM users")
+                sqlite_sequence_exists = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'"
+                ).fetchone()
+                if sqlite_sequence_exists:
+                    conn.execute(
+                        "DELETE FROM sqlite_sequence WHERE name IN ('verification_logs', 'fingerprints', 'users')"
+                    )
+
+                user_id_map = {}  # server user_id -> sqlite local id
+                users_synced = 0
+                fps_synced = 0
+
+                for user in users_data:
+                    if not isinstance(user, dict):
+                        continue
+
+                    server_user_id = user.get("user_id")
+                    employee_id = str(user.get("employee_id") or "").strip()
+                    full_name = str(user.get("full_name") or "").strip()
+                    if not server_user_id or not employee_id:
+                        continue
+
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO users (
+                            user_id, employee_id, full_name, department,
+                            role, is_active, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            server_user_id,
+                            employee_id,
+                            full_name,
+                            user.get("department", "") or "",
+                            user.get("role", "user") or "user",
+                            1 if user.get("is_active", True) else 0,
+                            user.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                            user.get("updated_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        ),
+                    )
+                    user_id_map[server_user_id] = cursor.lastrowid
+                    users_synced += 1
+
+                for fp in fps_data:
+                    if not isinstance(fp, dict):
+                        continue
+
+                    local_user_id = user_id_map.get(fp.get("user_id"))
+                    if not local_user_id:
+                        continue
+
+                    embedding_list = _normalize_embedding(fp.get("embedding"))
+                    if embedding_list is None:
+                        continue
+
                     if self._crypto is not None:
                         emb_enc = self._crypto.encrypt_embedding(embedding_list)
                     else:
                         import struct
                         emb_enc = struct.pack("<{}f".format(EMBEDDING_DIM), *embedding_list)
 
-                conn.execute(
-                    "INSERT INTO fingerprints (fingerprint_id, user_id, finger_index, quality_score, image_hash, embedding_enc, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (fp.get("fingerprint_id"), local_user_id, fp.get("finger_index", 0), fp.get("quality_score", 0), fp.get("image_hash", ""), emb_enc, 1)
-                )
+                    conn.execute(
+                        """
+                        INSERT INTO fingerprints (
+                            fingerprint_id, user_id, finger_index, quality_score,
+                            image_hash, embedding_enc, is_active, enrolled_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            fp.get("fingerprint_id"),
+                            local_user_id,
+                            int(fp.get("finger_index", 1)),
+                            float(fp.get("quality_score", 0) or 0),
+                            fp.get("image_hash", "") or "",
+                            emb_enc,
+                            1 if fp.get("is_active", True) else 0,
+                            fp.get("enrolled_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        ),
+                    )
+                    fps_synced += 1
 
-        await loop.run_in_executor(None, lambda: list(self._db.transaction())[0].execute("BEGIN") or _sync_tx(self._db._conn) or self._db._conn.commit())
+            return users_synced, fps_synced
+
+        users_synced, fps_synced = await loop.run_in_executor(None, _sync_tx)
 
         # Rebuild FAISS
         await self._rebuild_faiss_index()
 
-        return len(users_data), len(fps_data)
+        return users_synced, fps_synced
 
     # -- enrollment ----------------------------------------------------------
 

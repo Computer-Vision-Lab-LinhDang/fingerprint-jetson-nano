@@ -62,6 +62,10 @@ MQTT_HOST = os.environ.get("WORKER_MQTT_BROKER_HOST", _env.get("WORKER_MQTT_BROK
 MQTT_PORT = int(os.environ.get("WORKER_MQTT_BROKER_PORT", _env.get("WORKER_MQTT_BROKER_PORT", "1883")))
 MQTT_USER = os.environ.get("WORKER_MQTT_USERNAME", _env.get("WORKER_MQTT_USERNAME", ""))
 MQTT_PASS = os.environ.get("WORKER_MQTT_PASSWORD", _env.get("WORKER_MQTT_PASSWORD", ""))
+ORCHESTRATOR_URL = os.environ.get(
+    "WORKER_ORCHESTRATOR_URL",
+    _env.get("WORKER_ORCHESTRATOR_URL", "http://{}:8000".format(MQTT_HOST)),
+).rstrip("/")
 
 
 # ── MQTT State ───────────────────────────────────────────────
@@ -96,6 +100,10 @@ def fmt_ago(ts):
 
 def api_request(method, endpoint, data=None, timeout=15):
     url = "{}{}".format(BASE_URL, endpoint)
+    return _json_request(method, url, data=data, timeout=timeout)
+
+
+def _json_request(method, url, data=None, timeout=15):
     headers = {"Content-Type": "application/json"}
     req_data = json.dumps(data).encode("utf-8") if data else None
     req = urllib.request.Request(url, data=req_data, headers=headers, method=method)
@@ -105,11 +113,155 @@ def api_request(method, endpoint, data=None, timeout=15):
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8")
         try:
-            return json.loads(body)
+            parsed = json.loads(body)
+            if isinstance(parsed, dict):
+                parsed.setdefault("_http_status", e.code)
+            return parsed
         except Exception:
             return {"success": False, "error": "HTTP {}: {}".format(e.code, body[:200])}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+def _unwrap_json_response(payload):
+    if isinstance(payload, dict) and payload.get("success") is not False and "data" in payload:
+        return payload.get("data")
+    return payload
+
+
+def _extract_error(payload, fallback="Unknown error"):
+    if isinstance(payload, dict):
+        if payload.get("error"):
+            return str(payload.get("error"))
+        if payload.get("detail"):
+            return str(payload.get("detail"))
+        status = payload.get("_http_status")
+        if status:
+            return "HTTP {}".format(status)
+    return fallback
+
+
+_FINGER_INDEX_BY_NAME = {
+    "right_thumb": 0,
+    "right_index": 1,
+    "right_middle": 2,
+    "right_ring": 3,
+    "right_little": 4,
+    "left_thumb": 5,
+    "left_index": 6,
+    "left_middle": 7,
+    "left_ring": 8,
+    "left_little": 9,
+}
+
+
+def _normalize_finger_index(value, fallback=1):
+    try:
+        idx = int(value)
+    except (TypeError, ValueError):
+        idx = _FINGER_INDEX_BY_NAME.get(str(value or "").strip().lower(), fallback)
+    return max(0, min(9, idx))
+
+
+def _parse_embedding_list(value):
+    if isinstance(value, list):
+        raw_values = value
+    elif isinstance(value, str):
+        cleaned = value.strip().strip("[]")
+        raw_values = [part.strip() for part in cleaned.split(",") if part.strip()]
+    else:
+        return []
+
+    vector = []
+    for item in raw_values:
+        try:
+            vector.append(float(item))
+        except (TypeError, ValueError):
+            return []
+    return vector
+
+
+def _normalize_sync_payload(payload):
+    data = _unwrap_json_response(payload)
+    if not isinstance(data, dict):
+        raise ValueError("Invalid sync payload returned by orchestrator")
+
+    users = data.get("users")
+    fingerprints = data.get("fingerprints")
+    if not isinstance(users, list) or not isinstance(fingerprints, list):
+        raise ValueError("Sync payload is missing users or fingerprints list")
+
+    normalized_users = []
+    for user in users:
+        if not isinstance(user, dict):
+            continue
+        normalized_users.append({
+            "user_id": user.get("user_id") or user.get("id"),
+            "employee_id": user.get("employee_id") or user.get("username") or "",
+            "full_name": user.get("full_name") or user.get("name") or "",
+            "department": user.get("department", "") or "",
+            "role": user.get("role", "user") or "user",
+            "is_active": bool(user.get("is_active", True)),
+            "created_at": user.get("created_at"),
+            "updated_at": user.get("updated_at"),
+        })
+
+    normalized_fps = []
+    for fp in fingerprints:
+        if not isinstance(fp, dict):
+            continue
+        normalized_fps.append({
+            "fingerprint_id": fp.get("fingerprint_id") or fp.get("id"),
+            "user_id": fp.get("user_id"),
+            "finger_index": _normalize_finger_index(
+                fp.get("finger_index", fp.get("finger_type", fp.get("finger_id", 1)))
+            ),
+            "embedding": _parse_embedding_list(fp.get("embedding")),
+            "quality_score": fp.get("quality_score", 0) or 0,
+            "image_hash": fp.get("image_hash", "") or "",
+            "is_active": bool(fp.get("is_active", True)),
+            "enrolled_at": fp.get("enrolled_at") or fp.get("created_at"),
+        })
+
+    return {"users": normalized_users, "fingerprints": normalized_fps}
+
+
+def _fetch_sync_payload():
+    full_sync_url = "{}/api/sync/full".format(ORCHESTRATOR_URL)
+    response = _json_request("GET", full_sync_url, timeout=60)
+    try:
+        return _normalize_sync_payload(response), full_sync_url
+    except Exception:
+        full_sync_error = _extract_error(response, fallback="Invalid sync response")
+
+    users_url = "{}/api/users".format(ORCHESTRATOR_URL)
+    fingerprints_url = "{}/api/fingerprints".format(ORCHESTRATOR_URL)
+    users_response = _json_request("GET", users_url, timeout=60)
+    fingerprints_response = _json_request("GET", fingerprints_url, timeout=60)
+
+    users = _unwrap_json_response(users_response)
+    fingerprints = _unwrap_json_response(fingerprints_response)
+    if not isinstance(users, list):
+        raise RuntimeError(
+            "Full sync failed at {} ({}) and fallback users API failed ({})".format(
+                full_sync_url,
+                full_sync_error,
+                _extract_error(users_response, fallback="invalid users response"),
+            )
+        )
+    if not isinstance(fingerprints, list):
+        raise RuntimeError(
+            "Full sync failed at {} ({}) and fallback fingerprints API failed ({})".format(
+                full_sync_url,
+                full_sync_error,
+                _extract_error(fingerprints_response, fallback="invalid fingerprints response"),
+            )
+        )
+
+    return _normalize_sync_payload({
+        "users": users,
+        "fingerprints": fingerprints,
+    }), "{} + {}".format(users_url, fingerprints_url)
 
 
 def _add_log(event_type, topic, data_preview=""):
@@ -851,14 +1003,14 @@ def cmd_reconnect():
 # ── [s] Sync from Server ──────────────────────────────────
 def cmd_sync():
     print("\n  {cyan}{bold}═══ SYNC DATA FROM SERVER ═══{reset}\n".format(cyan=C.CYAN, bold=C.BOLD, reset=C.RESET))
-    # Fetch from orchestrator
-    url = "http://{}:8000/api/sync/full".format(MQTT_HOST)
-    print("  {yellow}⏳ Fetching data from Orchestrator: {}{reset}".format(url, yellow=C.YELLOW, reset=C.RESET))
+    print(
+        "  {yellow}⏳ Fetching data from Orchestrator: {url}{reset}".format(
+            url=ORCHESTRATOR_URL, yellow=C.YELLOW, reset=C.RESET
+        )
+    )
 
     try:
-        req = urllib.request.Request(url, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=15) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        payload, source = _fetch_sync_payload()
     except Exception as e:
         print("  {red}✗ Failed to fetch sync data: {}{reset}".format(e, red=C.RED, reset=C.RESET))
         return
@@ -867,15 +1019,20 @@ def cmd_sync():
     fingerprints = payload.get("fingerprints", [])
     print("  {green}✓ Received {} users, {} fingerprints.{reset}".format(
         len(users), len(fingerprints), green=C.GREEN, reset=C.RESET))
+    print("  {dim}Source: {source}{reset}".format(source=source, dim=C.DIM, reset=C.RESET))
 
     print("  {yellow}⏳ Overwriting local database and rebuilding FAISS...{reset}".format(yellow=C.YELLOW, reset=C.RESET))
-    res = api_request("POST", "/system/sync", data=payload)
+    res = api_request("POST", "/system/sync", data=payload, timeout=120)
     if res.get("success"):
         data = res.get("data", {})
         print("  {green}✓ Sync completed! Synced {} users, {} templates.{reset}".format(
             data.get("users_synced"), data.get("fingerprints_synced"), green=C.GREEN, reset=C.RESET))
     else:
-        print("  {red}✗ Sync failed! {err}{reset}".format(red=C.RED, err=res.get("error"), reset=C.RESET))
+        print("  {red}✗ Sync failed! {err}{reset}".format(
+            red=C.RED,
+            err=_extract_error(res),
+            reset=C.RESET,
+        ))
 
 # ── Main CLI Loop ───────────────────────────────────────────
 def run_cli():

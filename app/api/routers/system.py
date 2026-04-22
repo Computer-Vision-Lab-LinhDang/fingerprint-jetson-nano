@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from dateutil.parser import isoparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from app.api.pydantic_compat import model_dump_compat
 from app.api.schemas import (
@@ -207,4 +208,7 @@ async def sync_data(
             data={"users_synced": users_count, "fingerprints_synced": fps_count},
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        return JSONResponse(
+            status_code=500,
+            content=ApiResponse(success=False, error=str(exc)).dict(),
+        )
