@@ -7,7 +7,8 @@ dist/
 build/
 *.egg
 models/
-data/
+data/backups/
+data/mdgt_edge.db
 
 # Virtual environment
 venv/
