@@ -332,6 +332,14 @@ class FingerprintRepository:
         )
         return cur.rowcount
 
+    def delete_by_user_id(self, user_id):
+        # type: (int) -> int
+        cur = self._db.execute(
+            "DELETE FROM fingerprints WHERE user_id = ?",
+            (user_id,),
+        )
+        return cur.rowcount
+
     def count(self, active_only=False):
         # type: (bool) -> int
         if active_only:

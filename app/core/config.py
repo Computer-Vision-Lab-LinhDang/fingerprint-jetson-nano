@@ -78,7 +78,7 @@ class Settings(BaseSettings):
         description="Max time to wait for a stable finger capture",
     )
     duplicate_identify_threshold: float = Field(
-        default=0.98,
+        default=0.96,
         description="Stricter threshold used to reject duplicate enrollment",
     )
 

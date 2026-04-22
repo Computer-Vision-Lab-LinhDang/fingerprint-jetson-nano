@@ -501,16 +501,18 @@ class PipelineService:
             return False
 
         loop = asyncio.get_event_loop()
-        changed = False
+
+        # Look up the local user first (need local id to delete fingerprints)
+        local_user = None
         if remote_user_id:
-            changed = await loop.run_in_executor(
-                None, self._user_repo.delete_by_user_uuid, remote_user_id
+            local_user = await loop.run_in_executor(
+                None, self._user_repo.get_by_user_uuid, remote_user_id
             )
-        if not changed and employee_id:
-            changed = await loop.run_in_executor(
-                None, self._user_repo.delete_by_employee_id, employee_id
+        if local_user is None and employee_id:
+            local_user = await loop.run_in_executor(
+                None, self._user_repo.get_by_employee_id, employee_id
             )
-        if not changed:
+        if local_user is None:
             logger.info(
                 "User delete sync skipped; no local record found (user_id=%s employee_id=%s)",
                 remote_user_id,
@@ -518,8 +520,20 @@ class PipelineService:
             )
             return True
 
-        if changed:
-            await self._rebuild_faiss_index()
+        # Delete fingerprints first to avoid FK constraint
+        if self._fp_repo is not None:
+            await loop.run_in_executor(
+                None, self._fp_repo.delete_by_user_id, local_user.id
+            )
+
+        # Now delete the user
+        await loop.run_in_executor(None, self._user_repo.delete, local_user.id)
+
+        await self._rebuild_faiss_index()
+        logger.info(
+            "Sync: deleted local user %s (employee_id=%s)",
+            remote_user_id, employee_id,
+        )
         return True
 
     async def sync_remote_fingerprint_deleted(self, data: Dict[str, Any]) -> bool:
@@ -798,21 +812,20 @@ class PipelineService:
             )
             if duplicate_candidates:
                 duplicate = duplicate_candidates[0]
-                is_same_user = int(duplicate.user_id) == int(user_id)
-                if not is_same_user:
-                    return EnrollResult(
-                        user_id=user_id,
-                        finger=selected_finger,
-                        quality_score=quality,
-                        template_count=0,
-                        success=False,
-                        message=(
-                            "Fingerprint already enrolled: {} ({})".format(
-                                duplicate.full_name,
-                                duplicate.employee_id,
-                            )
-                        ),
-                    )
+                return EnrollResult(
+                    user_id=user_id,
+                    finger=selected_finger,
+                    quality_score=quality,
+                    template_count=0,
+                    success=False,
+                    message=(
+                        "Fingerprint already enrolled: {} ({}) — score {:.1f}%".format(
+                            duplicate.full_name,
+                            duplicate.employee_id,
+                            duplicate.score * 100,
+                        )
+                    ),
+                )
 
             # Encrypt and save to DB
             embedding_list = embedding.tolist()
