@@ -297,12 +297,14 @@ def _handle_enrollment_upload(mqtt_client_ref: Any, task_data: dict) -> None:
         object_name = task_data.get("object_name", "")
         fingerprint_id = task_data.get("fingerprint_id", "")
         content_type = task_data.get("content_type", "image/tiff")
+        image_encrypted = bool(task_data.get("image_encrypted", False))
 
         svc = get_pipeline_service_sync()
         ok = svc.upload_pending_enrollment_image(
             fp_id=fp_id,
             upload_url=upload_url,
             content_type=content_type,
+            image_encrypted=image_encrypted,
         )
 
         status_payload = {

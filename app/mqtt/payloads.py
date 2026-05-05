@@ -46,6 +46,7 @@ class TaskPayload:
         self.task_id: str = kwargs.get("task_id", "")
         self.task_type: str = kwargs.get("task_type", "embed")
         self.image_url: str = kwargs.get("image_url", "")
+        self.image_encrypted: bool = bool(kwargs.get("image_encrypted", False))
         self.model_name: str = kwargs.get("model_name", "default")
         self.extra: Dict[str, Any] = kwargs.get("extra", {})
 
@@ -114,6 +115,7 @@ class EnrollmentUploadPayload:
         self.object_name: str = kwargs.get("object_name", "")
         self.upload_url: str = kwargs.get("upload_url", "")
         self.content_type: str = kwargs.get("content_type", "image/tiff")
+        self.image_encrypted: bool = bool(kwargs.get("image_encrypted", False))
 
 
 class SyncCheckPayload:
