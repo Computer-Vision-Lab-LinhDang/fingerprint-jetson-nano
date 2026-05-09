@@ -16,6 +16,12 @@ import time
 
 import requests
 
+from app.core.crypto_utils import (
+    decrypt_image_bytes,
+    decrypt_field,
+    is_encryption_enabled,
+)
+
 logger = logging.getLogger(__name__)
 
 # ── Cached inference engine (singleton) ──────────────────────────────────────
@@ -86,6 +92,7 @@ class TaskService:
         image_url = task_data.get("image_url", "")
         model_name = task_data.get("model_name", "default")
         extra = task_data.get("extra", {})
+        image_encrypted = task_data.get("image_encrypted", False)
 
         logger.info("Processing EMBED task %s", task_id)
         t0 = time.time()
@@ -94,6 +101,12 @@ class TaskService:
             # 1. Download image
             logger.info("Downloading image from URL...")
             image_bytes = self._download_image(image_url)
+            if image_encrypted and is_encryption_enabled():
+                image_bytes = decrypt_image_bytes(image_bytes.decode("utf-8"))
+                logger.info(
+                    "Decrypted embed image from orchestrator (%d bytes)",
+                    len(image_bytes),
+                )
             logger.info("Downloaded %d bytes", len(image_bytes))
 
             # 2. Run inference
@@ -167,8 +180,15 @@ class TaskService:
 
             # Step 1: Get image bytes (from base64 or sensor capture)
             if image_base64:
-                image_bytes = base64.b64decode(image_base64)
-                logger.info("Using provided image (%d bytes)", len(image_bytes))
+                image_encrypted = task_data.get("image_encrypted", False)
+                if image_encrypted and is_encryption_enabled():
+                    image_bytes = decrypt_image_bytes(image_base64)
+                    logger.info(
+                        "Decrypted image from orchestrator (%d bytes)", len(image_bytes)
+                    )
+                else:
+                    image_bytes = base64.b64decode(image_base64)
+                    logger.info("Using provided image (%d bytes)", len(image_bytes))
             else:
                 # Capture from local sensor
                 image_bytes = _run_async(self._capture_from_sensor())
@@ -242,7 +262,14 @@ class TaskService:
 
             # Step 1: Get image bytes
             if image_base64:
-                image_bytes = base64.b64decode(image_base64)
+                image_encrypted = task_data.get("image_encrypted", False)
+                if image_encrypted and is_encryption_enabled():
+                    image_bytes = decrypt_image_bytes(image_base64)
+                    logger.info(
+                        "Decrypted verify image from orchestrator (%d bytes)", len(image_bytes)
+                    )
+                else:
+                    image_bytes = base64.b64decode(image_base64)
             else:
                 image_bytes = _run_async(self._capture_from_sensor())
 

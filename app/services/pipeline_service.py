@@ -1355,6 +1355,7 @@ class PipelineService:
         fp_id: int,
         upload_url: str,
         content_type: str = "image/tiff",
+        image_encrypted: bool = False,
     ) -> bool:
         path = self._pending_image_path(fp_id)
         if not path.exists():
@@ -1362,6 +1363,11 @@ class PipelineService:
             return False
 
         image_bytes = path.read_bytes()
+        if image_encrypted:
+            from app.core.crypto_utils import encrypt_image_bytes, is_encryption_enabled
+
+            if is_encryption_enabled():
+                image_bytes = encrypt_image_bytes(image_bytes).encode("utf-8")
         last_error = None
         for attempt in range(1, 4):
             try:
